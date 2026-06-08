@@ -612,21 +612,60 @@ if uploaded is None:
 # ─────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data(file_bytes, filename):
-    for enc in ['latin1', 'utf-8', 'cp1252']:
+    encodings = ['latin1', 'utf-8', 'cp1252']
+    separators = [',', ';', '\t']
+    for enc in encodings:
         try:
-            df = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine='python', encoding=enc, low_memory=False)
-            return df
+            sample = io.BytesIO(file_bytes)
+            head = b""
+            for _ in range(20):
+                line = sample.readline()
+                if not line:
+                    break
+                head += line
+            head_str = head.decode(enc, errors='replace')
+            first_line = head_str.split('\n')[0]
+            sep_counts = {s: first_line.count(s) for s in separators}
+            best_sep = max(sep_counts, key=sep_counts.get)
         except Exception:
-            continue
-    return None
+            best_sep = ','
+        for sep in ([best_sep] + [s for s in separators if s != best_sep]):
+            try:
+                df = pd.read_csv(
+                    io.BytesIO(file_bytes),
+                    sep=sep,
+                    encoding=enc,
+                    low_memory=False,
+                    on_bad_lines='skip',
+                )
+                if df.shape[1] >= 3:
+                    return df, enc, sep
+            except Exception:
+                continue
+    return None, None, None
 
-with st.spinner("Chargement du fichier…"):
+with st.spinner("Chargement du fichier… (patientez pour les fichiers volumineux)"):
     file_bytes = uploaded.read()
-    df_raw = load_data(file_bytes, uploaded.name)
+    df_raw, detected_enc, detected_sep = load_data(file_bytes, uploaded.name)
 
 if df_raw is None:
-    st.error("Impossible de lire le fichier. Vérifiez l'encodage et le format.")
+    st.error("❌ Impossible de lire le fichier.")
+    st.markdown("""
+**Causes possibles :**
+- Fichier corrompu ou incomplet
+- Format non CSV (Excel .xlsx → enregistrer en CSV depuis Excel d'abord)
+- Encodage inhabituel
+
+**Solution rapide :** ouvre le fichier dans Excel → *Enregistrer sous* → CSV UTF-8, puis recharge.
+    """)
     st.stop()
+else:
+    st.sidebar.markdown(f"""
+    <div style='font-size:0.7rem; color:#484f58; margin-top:8px;'>
+    ✓ Encodage : <code style='color:#58a6ff'>{detected_enc}</code><br>
+    ✓ Séparateur : <code style='color:#58a6ff'>{repr(detected_sep)}</code><br>
+    ✓ {len(df_raw):,} lignes · {df_raw.shape[1]} colonnes
+    </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
 
 fmt = detect_format(df_raw)
 
