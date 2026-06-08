@@ -168,17 +168,21 @@ def stats_naiades(df, support_filter=None):
     s['n_stations']      = d['LbStationMesureEauxSurface'].nunique() if 'LbStationMesureEauxSurface' in d.columns else 0
     s['n_parametres']    = d['LbLongParamètre'].nunique() if 'LbLongParamètre' in d.columns else 0
     s['n_campagnes']     = d['CdPrelevement'].nunique() if 'CdPrelevement' in d.columns else 0
-    s['annee_min']       = int(d['année'].min()) if 'année' in d.columns and not d['année'].isna().all() else '?'
-    s['annee_max']       = int(d['année'].max()) if 'année' in d.columns and not d['année'].isna().all() else '?'
+    try:
+        s['annee_min'] = int(d['année'].min()) if 'année' in d.columns and d['année'].notna().any() else '?'
+        s['annee_max'] = int(d['année'].max()) if 'année' in d.columns and d['année'].notna().any() else '?'
+    except (ValueError, TypeError):
+        s['annee_min'] = '?'
+        s['annee_max'] = '?'
     s['n_annees']        = d['année'].nunique() if 'année' in d.columns else 0
     s['supports']        = sorted(df['LbSupport'].dropna().unique().tolist()) if 'LbSupport' in df.columns else []
     s['n_supports']      = len(s['supports'])
     s['fractions']       = d['LbFractionAnalysee'].dropna().unique().tolist() if 'LbFractionAnalysee' in d.columns else []
     s['n_fractions']     = len(s['fractions'])
-    s['qualif']          = d['LbQualAna'].value_counts().to_dict() if 'LbQualAna' in d.columns else {}
-    s['statut']          = d['MnemoStatutAna'].value_counts().to_dict() if 'MnemoStatutAna' in d.columns else {}
+    s['qualif']          = {str(k): v for k,v in d['LbQualAna'].value_counts().to_dict().items() if str(k) != 'nan'} if 'LbQualAna' in d.columns else {}
+    s['statut']          = {str(k): v for k,v in d['MnemoStatutAna'].value_counts().to_dict().items() if str(k) != 'nan'} if 'MnemoStatutAna' in d.columns else {}
     s['n_producteurs']   = d['NomProducteur'].nunique() if 'NomProducteur' in d.columns else 0
-    s['producteurs']     = d['NomProducteur'].value_counts().to_dict() if 'NomProducteur' in d.columns else {}
+    s['producteurs']     = {str(k): v for k,v in d['NomProducteur'].value_counts().to_dict().items() if str(k) != 'nan'} if 'NomProducteur' in d.columns else {}
     s['params_par_support']  = d.groupby('LbSupport')['LbLongParamètre'].nunique().to_dict() if 'LbSupport' in d.columns else {}
     s['mesures_par_station'] = d.groupby('LbStationMesureEauxSurface').size().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
     s['params_par_station']  = d.groupby('LbStationMesureEauxSurface')['LbLongParamètre'].nunique().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
@@ -217,18 +221,22 @@ def stats_ades(df, support_filter=None):
     s['n_stations']      = d['Identifiant national BSS'].nunique() if 'Identifiant national BSS' in d.columns else 0
     s['n_parametres']    = d['Paramètre'].nunique() if 'Paramètre' in d.columns else 0
     s['n_campagnes']     = d['Numéro de prélèvement'].nunique() if 'Numéro de prélèvement' in d.columns else 0
-    s['annee_min']       = int(d['année'].min()) if 'année' in d.columns and not d['année'].isna().all() else '?'
-    s['annee_max']       = int(d['année'].max()) if 'année' in d.columns and not d['année'].isna().all() else '?'
+    try:
+        s['annee_min'] = int(d['année'].min()) if 'année' in d.columns and d['année'].notna().any() else '?'
+        s['annee_max'] = int(d['année'].max()) if 'année' in d.columns and d['année'].notna().any() else '?'
+    except (ValueError, TypeError):
+        s['annee_min'] = '?'
+        s['annee_max'] = '?'
     s['n_annees']        = d['année'].nunique() if 'année' in d.columns else 0
     s['supports']        = sorted(df['Support'].dropna().unique().tolist()) if 'Support' in df.columns else []
     s['n_supports']      = len(s['supports'])
     s['fractions']       = d['Fraction analysée'].dropna().unique().tolist() if 'Fraction analysée' in d.columns else []
     s['n_fractions']     = len(s['fractions'])
-    s['qualif']          = d['Qualification'].value_counts().to_dict() if 'Qualification' in d.columns else {}
-    s['statut']          = d['Statut mesure'].value_counts().to_dict() if 'Statut mesure' in d.columns else {}
+    s['qualif']          = {str(k): v for k,v in d['Qualification'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Qualification' in d.columns else {}
+    s['statut']          = {str(k): v for k,v in d['Statut mesure'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Statut mesure' in d.columns else {}
     s['n_producteurs']   = d['Producteur données'].nunique() if 'Producteur données' in d.columns else 0
-    s['producteurs']     = d['Producteur données'].value_counts().to_dict() if 'Producteur données' in d.columns else {}
-    s['types_point']     = d['Type qualitomètre'].value_counts().to_dict() if 'Type qualitomètre' in d.columns else {}
+    s['producteurs']     = {str(k): v for k,v in d['Producteur données'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Producteur données' in d.columns else {}
+    s['types_point']     = {str(k): v for k,v in d['Type qualitomètre'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Type qualitomètre' in d.columns else {}
     s['params_par_support']  = d.groupby('Support')['Paramètre'].nunique().to_dict() if 'Support' in d.columns else {}
     s['mesures_par_station'] = d.groupby('Identifiant national BSS').size().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
     s['params_par_station']  = d.groupby('Identifiant national BSS')['Paramètre'].nunique().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
@@ -241,10 +249,11 @@ def stats_ades(df, support_filter=None):
 # GRAPHIQUES
 # ─────────────────────────────────────────────
 def fig_timeline(s, palette, theme, fsize, fig_h):
-    if not s.get('mesures_par_annee'):
+    mpa = {k:v for k,v in s.get('mesures_par_annee',{}).items() if k == k}  # filtre NaN
+    if not mpa:
         return None
-    ann  = sorted(s['mesures_par_annee'].keys())
-    mes  = [s['mesures_par_annee'][a] for a in ann]
+    ann  = sorted(mpa.keys())
+    mes  = [mpa[a] for a in ann]
     camp = [s.get('campagnes_par_annee', {}).get(a, 0) for a in ann]
     c1, c2 = palette[0], palette[2] if len(palette) > 2 else palette[-1]
 
