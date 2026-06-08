@@ -607,48 +607,66 @@ if uploaded is None:
     st.stop()
 
 # ─────────────────────────────────────────────
-# CHARGEMENT & PARSING
+# CHARGEMENT & PARSING — tout en session_state
 # ─────────────────────────────────────────────
-# Persister les bytes dans session_state pour survivre aux reruns
-# (uploaded.read() ne fonctionne qu'une seule fois par upload)
-file_key = uploaded.name + str(uploaded.size)
-if 'file_key' not in st.session_state or st.session_state['file_key'] != file_key:
-    st.session_state['file_key']   = file_key
-    st.session_state['file_bytes'] = uploaded.read()
+# Clé unique par fichier (nom + taille)
+file_key = uploaded.name + "_" + str(uploaded.size)
 
-file_bytes = st.session_state['file_bytes']
+# Si nouveau fichier : lire, parser, mettre en cache
+if st.session_state.get('file_key') != file_key:
+    raw_bytes = uploaded.read()
+    if not raw_bytes:
+        st.error("❌ Fichier vide.")
+        st.stop()
 
-if not file_bytes:
-    st.error("❌ Fichier vide ou illisible.")
-    st.stop()
+    with st.spinner("Chargement… (patientez pour les fichiers volumineux)"):
+        df_raw, detected_enc, detected_sep = load_data(raw_bytes, uploaded.name)
 
-with st.spinner("Chargement… (patientez pour les fichiers volumineux)"):
-    df_raw, detected_enc, detected_sep = load_data(file_bytes, uploaded.name)
+    if df_raw is None:
+        st.error("❌ Impossible de lire le fichier.")
+        st.markdown("**Solution :** ouvre le fichier dans Excel → *Enregistrer sous* → **CSV UTF-8**, puis recharge.")
+        st.stop()
 
-if df_raw is None:
-    st.error("❌ Impossible de lire le fichier.")
-    st.markdown("""**Solutions :** ouvre le fichier dans Excel → *Enregistrer sous* → **CSV UTF-8**, puis recharge.""")
-    st.stop()
+    fmt_detected = detect_format(df_raw)
+    if fmt_detected not in ('NAIADES', 'ADES'):
+        st.warning("Format non reconnu. Vérifiez la structure du fichier.")
+        st.dataframe(df_raw.head(3))
+        st.stop()
 
-fmt = detect_format(df_raw)
+    with st.spinner("Analyse de la structure…"):
+        if fmt_detected == 'NAIADES':
+            df_parsed = parse_naiades(df_raw)
+            s_full, _ = stats_naiades(df_parsed)
+            badge_class  = 'badge-naiades'
+            badge_label  = 'Naïades — Eaux de surface'
+        else:
+            df_parsed = parse_ades(df_raw)
+            s_full, _ = stats_ades(df_parsed)
+            badge_class  = 'badge-ades'
+            badge_label  = 'ADES — Eaux souterraines'
 
-if fmt not in ('NAIADES', 'ADES'):
-    st.warning("Format non reconnu. Vérifiez la structure du fichier.")
-    st.dataframe(df_raw.head(3))
-    st.stop()
+    # Tout stocker en session_state
+    st.session_state['file_key']      = file_key
+    st.session_state['df_parsed']     = df_parsed
+    st.session_state['s_full']        = s_full
+    st.session_state['fmt']           = fmt_detected
+    st.session_state['badge_class']   = badge_class
+    st.session_state['badge_label']   = badge_label
+    st.session_state['detected_enc']  = detected_enc
+    st.session_state['detected_sep']  = detected_sep
+    st.session_state['n_raw_rows']    = len(df_raw)
+    st.session_state['n_raw_cols']    = df_raw.shape[1]
 
-if fmt == 'NAIADES':
-    df_parsed = parse_naiades(df_raw)
-    badge_class, badge_label = 'badge-naiades', 'Naïades — Eaux de surface'
-else:
-    df_parsed = parse_ades(df_raw)
-    badge_class, badge_label = 'badge-ades', 'ADES — Eaux souterraines'
-
-# Stats complètes (sans filtre) pour les supports disponibles
-if fmt == 'NAIADES':
-    s_full, _ = stats_naiades(df_parsed)
-else:
-    s_full, _ = stats_ades(df_parsed)
+# Récupérer depuis session_state (reruns sans re-parsing)
+df_parsed     = st.session_state['df_parsed']
+s_full        = st.session_state['s_full']
+fmt           = st.session_state['fmt']
+badge_class   = st.session_state['badge_class']
+badge_label   = st.session_state['badge_label']
+detected_enc  = st.session_state['detected_enc']
+detected_sep  = st.session_state['detected_sep']
+n_raw_rows    = st.session_state['n_raw_rows']
+n_raw_cols    = st.session_state['n_raw_cols']
 
 all_supports = s_full.get('supports', [])
 
@@ -675,22 +693,39 @@ with st.sidebar:
     else:
         sel_supports = []
 
-    st.markdown(f"""
-    <div style='font-size:0.68rem; color:#484f58; margin-top:10px;'>
-    ✓ Encodage : <code style='color:#58a6ff'>{detected_enc}</code><br>
-    ✓ Séparateur : <code style='color:#58a6ff'>{repr(detected_sep)}</code><br>
-    ✓ {len(df_raw):,} lignes · {df_raw.shape[1]} colonnes
-    </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
+    if st.session_state.get('file_key'):
+        st.markdown(f"""
+        <div style='font-size:0.68rem; color:#484f58; margin-top:10px;'>
+        ✓ Encodage : <code style='color:#58a6ff'>{st.session_state.get('detected_enc','?')}</code><br>
+        ✓ Séparateur : <code style='color:#58a6ff'>{repr(st.session_state.get('detected_sep','?'))}</code><br>
+        ✓ {st.session_state.get('n_raw_rows',0):,} lignes · {st.session_state.get('n_raw_cols',0)} colonnes
+        </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
 
 # Stats filtrées (pour onglets 1 et 2) et complètes (pour 3 et 4)
 support_filter = sel_supports if sel_supports and set(sel_supports) != set(all_supports) else None
 
-if fmt == 'NAIADES':
-    s_filt, df_filt = stats_naiades(df_parsed, support_filter)
-    s_full, df_full = stats_naiades(df_parsed)
-else:
-    s_filt, df_filt = stats_ades(df_parsed, support_filter)
-    s_full, df_full = stats_ades(df_parsed)
+# Cache les stats filtrées (recalcul seulement si le filtre change)
+filt_key = str(sorted(support_filter)) if support_filter else "all"
+if st.session_state.get('filt_key') != filt_key or st.session_state.get('file_key') != file_key:
+    if fmt == 'NAIADES':
+        s_filt, df_filt = stats_naiades(df_parsed, support_filter)
+        s_full_new, df_full = stats_naiades(df_parsed)
+    else:
+        s_filt, df_filt = stats_ades(df_parsed, support_filter)
+        s_full_new, df_full = stats_ades(df_parsed)
+    st.session_state['filt_key'] = filt_key
+    st.session_state['s_filt']   = s_filt
+    st.session_state['df_filt']  = df_filt
+    st.session_state['df_full']  = df_full
+    # s_full already stored but recompute if new file
+    if st.session_state.get('s_full_computed') != file_key:
+        st.session_state['s_full'] = s_full_new
+        st.session_state['s_full_computed'] = file_key
+
+s_filt  = st.session_state['s_filt']
+df_filt = st.session_state['df_filt']
+df_full = st.session_state['df_full']
+s_full  = st.session_state['s_full']
 
 # ─────────────────────────────────────────────
 # HEADER
