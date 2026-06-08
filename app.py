@@ -209,6 +209,14 @@ PLOTLY_LAYOUT = dict(
     yaxis=dict(gridcolor='#21262d', linecolor='#30363d', tickcolor='#30363d'),
     margin=dict(l=20, r=20, t=40, b=20),
 )
+# Version sans xaxis/yaxis pour make_subplots et cas particuliers
+PLOTLY_BASE = dict(
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(0,0,0,0)',
+    font=dict(family='DM Sans', color='#c9d1d9', size=12),
+    margin=dict(l=20, r=20, t=40, b=20),
+)
+AXIS_STYLE = dict(gridcolor='#21262d', linecolor='#30363d', tickcolor='#30363d')
 
 COLORS_NAIADES = ['#58a6ff', '#1f6feb', '#388bfd', '#79c0ff', '#a5d6ff', '#cae8ff']
 COLORS_ADES    = ['#3fb950', '#238636', '#2ea043', '#56d364', '#7ee787', '#acf2bd']
@@ -341,16 +349,22 @@ def fig_timeline(s, colors):
         x=ann, y=camp, name="Campagnes", line=dict(color=colors[2], width=2.5),
         mode='lines+markers', marker=dict(size=5),
     ), secondary_y=True)
+    # make_subplots: ne pas passer xaxis/yaxis via **PLOTLY_LAYOUT, les gérer via update_xaxes/update_yaxes
     fig.update_layout(
-        **PLOTLY_LAYOUT,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family='DM Sans', color='#c9d1d9', size=12),
+        margin=dict(l=20, r=20, t=40, b=20),
         title=dict(text="Évolution temporelle", font=dict(size=14, color='#e6edf3'), x=0),
         legend=dict(orientation='h', y=1.08, bgcolor='rgba(0,0,0,0)', font=dict(size=11)),
-        xaxis=dict(**PLOTLY_LAYOUT['xaxis'], dtick=5),
         height=280,
         barmode='overlay',
     )
-    fig.update_yaxes(title_text="Nb mesures", secondary_y=False, gridcolor='#21262d', color='#7d8590', title_font_size=11)
-    fig.update_yaxes(title_text="Nb campagnes", secondary_y=True, gridcolor='rgba(0,0,0,0)', color='#7d8590', title_font_size=11)
+    fig.update_xaxes(gridcolor='#21262d', linecolor='#30363d', tickcolor='#30363d', dtick=5)
+    fig.update_yaxes(title_text="Nb mesures", secondary_y=False,
+                     gridcolor='#21262d', linecolor='#30363d', color='#7d8590', title_font_size=11)
+    fig.update_yaxes(title_text="Nb campagnes", secondary_y=True,
+                     gridcolor='rgba(0,0,0,0)', linecolor='#30363d', color='#7d8590', title_font_size=11)
     return fig
 
 def fig_stations_heterogeneite(s, colors, source):
@@ -385,12 +399,12 @@ def fig_stations_heterogeneite(s, colors, source):
         customdata=stations,
     ))
     fig.update_layout(
-        **PLOTLY_LAYOUT,
+        **PLOTLY_BASE,
         title=dict(text="Hétérogénéité inter-stations (taille = nb mesures)", font=dict(size=14, color='#e6edf3'), x=0),
-        xaxis=dict(**PLOTLY_LAYOUT['xaxis'], title='Années actives'),
-        yaxis=dict(**PLOTLY_LAYOUT['yaxis'], title='Paramètres uniques'),
         height=380,
     )
+    fig.update_xaxes(**AXIS_STYLE, title='Années actives')
+    fig.update_yaxes(**AXIS_STYLE, title='Paramètres uniques')
     return fig
 
 def fig_supports_params(s, colors):
@@ -412,12 +426,12 @@ def fig_supports_params(s, colors):
         textposition='outside',
     ))
     fig.update_layout(
-        **PLOTLY_LAYOUT,
+        **PLOTLY_BASE,
         title=dict(text="Paramètres par support", font=dict(size=14, color='#e6edf3'), x=0),
-        xaxis=dict(**PLOTLY_LAYOUT['xaxis'], title='Nb paramètres uniques'),
-        yaxis=dict(**PLOTLY_LAYOUT['yaxis'], categoryorder='total ascending'),
         height=max(200, len(labels)*55),
     )
+    fig.update_xaxes(**AXIS_STYLE, title='Nb paramètres uniques')
+    fig.update_yaxes(**AXIS_STYLE, categoryorder='total ascending')
     return fig
 
 def fig_qualite(s, colors):
@@ -466,12 +480,12 @@ def fig_producteurs(s, colors):
         text=values, textfont=dict(color='#c9d1d9', size=11), textposition='outside',
     ))
     fig.update_layout(
-        **PLOTLY_LAYOUT,
+        **PLOTLY_BASE,
         title=dict(text="Répartition par producteur", font=dict(size=14, color='#e6edf3'), x=0),
-        yaxis=dict(**PLOTLY_LAYOUT['yaxis'], title='Mesures'),
-        xaxis=dict(**PLOTLY_LAYOUT['xaxis'], tickangle=-25),
         height=260,
     )
+    fig.update_xaxes(**AXIS_STYLE, tickangle=-25)
+    fig.update_yaxes(**AXIS_STYLE, title='Mesures')
     return fig
 
 def fig_heatmap_stations(df, s, source):
@@ -492,17 +506,17 @@ def fig_heatmap_stations(df, s, source):
             labels=dict(x='Année', y='Station', color='Mesures'),
         )
         fig.update_layout(
-            **PLOTLY_LAYOUT,
+            **PLOTLY_BASE,
             title=dict(text="Couverture temporelle par station (Top 20)", font=dict(size=14, color='#e6edf3'), x=0),
             height=480,
-            xaxis=dict(**PLOTLY_LAYOUT['xaxis'], title='', dtick=5),
-            yaxis=dict(**PLOTLY_LAYOUT['yaxis'], title='', tickfont=dict(size=9)),
             coloraxis_colorbar=dict(
                 title="Mesures", thickness=12, len=0.7,
                 tickfont=dict(color='#7d8590', size=10),
                 title_font=dict(color='#7d8590', size=10),
             ),
         )
+        fig.update_xaxes(**AXIS_STYLE, title='', dtick=5)
+        fig.update_yaxes(**AXIS_STYLE, title='', tickfont=dict(size=9))
         return fig
     except Exception as e:
         return None
@@ -526,12 +540,12 @@ def fig_top_params(df, source, colors, n=20):
         textfont=dict(color='#c9d1d9', size=10), textposition='outside',
     ))
     fig.update_layout(
-        **PLOTLY_LAYOUT,
+        **PLOTLY_BASE,
         title=dict(text=f"Top {n} paramètres les plus mesurés", font=dict(size=14, color='#e6edf3'), x=0),
-        xaxis=dict(**PLOTLY_LAYOUT['xaxis'], title='Nb mesures'),
-        yaxis=dict(**PLOTLY_LAYOUT['yaxis'], tickfont=dict(size=9), categoryorder='total ascending'),
         height=max(300, n*24),
     )
+    fig.update_xaxes(**AXIS_STYLE, title='Nb mesures')
+    fig.update_yaxes(**AXIS_STYLE, tickfont=dict(size=9), categoryorder='total ascending')
     return fig
 
 # ─────────────────────────────────────────────
