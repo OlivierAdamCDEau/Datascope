@@ -133,7 +133,7 @@ def detect_format(df):
     cols = ' '.join([c.lower() for c in df.columns])
     if 'lbsupport' in cols or 'cdstationmesure' in cols or 'lblong' in cols:
         return 'NAIADES'
-    if 'identifiant national bss' in cols or ('bss' in cols and 'qualification' in cols):
+    if 'identifiant national bss' in cols or 'code_bss' in cols or ('bss' in cols and 'qualification' in cols and 'lbsupport' not in cols):
         return 'ADES'
     return 'INCONNU'
 
@@ -183,12 +183,12 @@ def stats_naiades(df, support_filter=None):
     s['statut']          = {str(k): v for k,v in d['MnemoStatutAna'].value_counts().to_dict().items() if str(k) != 'nan'} if 'MnemoStatutAna' in d.columns else {}
     s['n_producteurs']   = d['NomProducteur'].nunique() if 'NomProducteur' in d.columns else 0
     s['producteurs']     = {str(k): v for k,v in d['NomProducteur'].value_counts().to_dict().items() if str(k) != 'nan'} if 'NomProducteur' in d.columns else {}
-    s['params_par_support']  = d.groupby('LbSupport')['LbLongParamètre'].nunique().to_dict() if 'LbSupport' in d.columns else {}
-    s['mesures_par_station'] = d.groupby('LbStationMesureEauxSurface').size().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
-    s['params_par_station']  = d.groupby('LbStationMesureEauxSurface')['LbLongParamètre'].nunique().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
-    s['annees_par_station']  = d.groupby('LbStationMesureEauxSurface')['année'].nunique().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
-    s['campagnes_par_annee'] = d.groupby('année')['CdPrelevement'].nunique().to_dict() if 'CdPrelevement' in d.columns else {}
-    s['mesures_par_annee']   = d.groupby('année').size().to_dict() if 'année' in d.columns else {}
+    s['params_par_support']  = d.dropna(subset=['LbSupport']).groupby('LbSupport')['LbLongParamètre'].nunique().to_dict() if 'LbSupport' in d.columns else {}
+    s['mesures_par_station'] = d.dropna(subset=['LbStationMesureEauxSurface']).groupby('LbStationMesureEauxSurface').size().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
+    s['params_par_station']  = d.dropna(subset=['LbStationMesureEauxSurface']).groupby('LbStationMesureEauxSurface')['LbLongParamètre'].nunique().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
+    s['annees_par_station']  = d.dropna(subset=['LbStationMesureEauxSurface']).groupby('LbStationMesureEauxSurface')['année'].nunique().sort_values(ascending=False).to_dict() if 'LbStationMesureEauxSurface' in d.columns else {}
+    s['campagnes_par_annee'] = d.dropna(subset=['année']).groupby('année')['CdPrelevement'].nunique().to_dict() if 'CdPrelevement' in d.columns else {}
+    s['mesures_par_annee']   = d.dropna(subset=['année']).groupby('année').size().to_dict() if 'année' in d.columns else {}
     return s, d
 
 # ─────────────────────────────────────────────
@@ -237,12 +237,12 @@ def stats_ades(df, support_filter=None):
     s['n_producteurs']   = d['Producteur données'].nunique() if 'Producteur données' in d.columns else 0
     s['producteurs']     = {str(k): v for k,v in d['Producteur données'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Producteur données' in d.columns else {}
     s['types_point']     = {str(k): v for k,v in d['Type qualitomètre'].value_counts().to_dict().items() if str(k) != 'nan'} if 'Type qualitomètre' in d.columns else {}
-    s['params_par_support']  = d.groupby('Support')['Paramètre'].nunique().to_dict() if 'Support' in d.columns else {}
-    s['mesures_par_station'] = d.groupby('Identifiant national BSS').size().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
-    s['params_par_station']  = d.groupby('Identifiant national BSS')['Paramètre'].nunique().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
-    s['annees_par_station']  = d.groupby('Identifiant national BSS')['année'].nunique().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
-    s['campagnes_par_annee'] = d.groupby('année')['Numéro de prélèvement'].nunique().to_dict() if 'Numéro de prélèvement' in d.columns else {}
-    s['mesures_par_annee']   = d.groupby('année').size().to_dict() if 'année' in d.columns else {}
+    s['params_par_support']  = d.dropna(subset=['Support']).groupby('Support')['Paramètre'].nunique().to_dict() if 'Support' in d.columns else {}
+    s['mesures_par_station'] = d.dropna(subset=['Identifiant national BSS']).groupby('Identifiant national BSS').size().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
+    s['params_par_station']  = d.dropna(subset=['Identifiant national BSS']).groupby('Identifiant national BSS')['Paramètre'].nunique().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
+    s['annees_par_station']  = d.dropna(subset=['Identifiant national BSS']).groupby('Identifiant national BSS')['année'].nunique().sort_values(ascending=False).to_dict() if 'Identifiant national BSS' in d.columns else {}
+    s['campagnes_par_annee'] = d.dropna(subset=['année']).groupby('année')['Numéro de prélèvement'].nunique().to_dict() if 'Numéro de prélèvement' in d.columns else {}
+    s['mesures_par_annee']   = d.dropna(subset=['année']).groupby('année').size().to_dict() if 'année' in d.columns else {}
     return s, d
 
 # ─────────────────────────────────────────────
@@ -292,7 +292,11 @@ def fig_timeline(s, palette, theme, fsize, fig_h):
 def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
     try:
         col_st = s['col_station']
-        pivot = df.groupby([col_st, 'année']).size().unstack(fill_value=0)
+        df_hm = df.dropna(subset=[col_st, 'année']).copy()
+        df_hm['année'] = df_hm['année'].astype(int)
+        if df_hm.empty:
+            return None
+        pivot = df_hm.groupby([col_st, 'année']).size().unstack(fill_value=0)
         top = pivot.sum(axis=1).nlargest(20).index
         pivot = pivot.loc[top]
         t = THEMES_EXPORT[theme]
@@ -660,7 +664,7 @@ with st.sidebar:
     </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
 
 # Stats filtrées (pour onglets 1 et 2) et complètes (pour 3 et 4)
-support_filter = sel_supports if sel_supports != all_supports and sel_supports else None
+support_filter = sel_supports if sel_supports and set(sel_supports) != set(all_supports) else None
 
 if fmt == 'NAIADES':
     s_filt, df_filt = stats_naiades(df_parsed, support_filter)
@@ -716,12 +720,18 @@ with tab1:
     st.markdown("<div class='section-header'>Évolution temporelle</div>", unsafe_allow_html=True)
     fig_t = fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
     if fig_t:
-        st.plotly_chart(fig_t, use_container_width=True)
+        try:
+            st.plotly_chart(fig_t, use_container_width=True)
+        except Exception as e:
+            st.warning(f'⚠️ Impossible d\'afficher ce graphique : {e}')
 
     st.markdown("<div class='section-header'>Couverture par station</div>", unsafe_allow_html=True)
     fig_hm = fig_heatmap_stations(df_filt, s_filt, fmt, sel_palette, sel_theme, fsize, fig_h_base)
     if fig_hm:
-        st.plotly_chart(fig_hm, use_container_width=True)
+        try:
+            st.plotly_chart(fig_hm, use_container_width=True)
+        except Exception as e:
+            st.warning(f'⚠️ Impossible d\'afficher la heatmap : {e}')
     else:
         st.info("Données insuffisantes pour la heatmap.")
 
@@ -740,7 +750,10 @@ with tab2:
 
     fig_het = fig_stations_heterogeneite(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
     if fig_het:
-        st.plotly_chart(fig_het, use_container_width=True)
+        try:
+            st.plotly_chart(fig_het, use_container_width=True)
+        except Exception as e:
+            st.warning(f'⚠️ Impossible d\'afficher ce graphique : {e}')
 
     st.markdown("<div class='section-header'>Inventaire des stations</div>", unsafe_allow_html=True)
     col_st_name = 'Station' if fmt == 'NAIADES' else 'Station (BSS)'
@@ -759,7 +772,10 @@ with tab3:
         st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
         fig_sp = fig_supports_params(s_full, sel_palette, sel_theme, fsize, fig_h_base)
         if fig_sp:
-            st.plotly_chart(fig_sp, use_container_width=True)
+            try:
+                st.plotly_chart(fig_sp, use_container_width=True)
+            except Exception as e:
+                st.warning(f'⚠️ {e}')
         # Fractions
         if s_full.get('fractions'):
             st.markdown("<div class='section-header' style='margin-top:14px;'>Fractions analysées</div>",
@@ -771,7 +787,10 @@ with tab3:
         st.markdown("<div class='section-header'>Top paramètres</div>", unsafe_allow_html=True)
         n_top = st.slider("Nombre de paramètres", 10, 50, 20, key='top_params')
         fig_tp = fig_top_params(df_full, s_full, sel_palette, sel_theme, fsize, fig_h_base, n=n_top)
-        st.plotly_chart(fig_tp, use_container_width=True)
+        try:
+            st.plotly_chart(fig_tp, use_container_width=True)
+        except Exception as e:
+            st.warning(f'⚠️ {e}')
 
 # ── TAB 4 : Qualité & Producteurs ────────────
 with tab4:
@@ -780,13 +799,16 @@ with tab4:
         st.markdown("<div class='section-header'>Qualification des données</div>", unsafe_allow_html=True)
         fig_qua = fig_qualite(s_full, sel_palette, sel_theme, fsize, fig_h_base)
         if fig_qua:
-            st.plotly_chart(fig_qua, use_container_width=True)
+            try:
+                st.plotly_chart(fig_qua, use_container_width=True)
+            except Exception as e:
+                st.warning(f'⚠️ {e}')
 
         if s_full.get('statut'):
             st.markdown("<div class='section-header'>Statut des analyses</div>", unsafe_allow_html=True)
             t = THEMES_EXPORT[sel_theme]
             for k, v in s_full['statut'].items():
-                pct = v / s_full['n_mesures'] * 100
+                pct = (v / s_full['n_mesures'] * 100) if s_full.get('n_mesures', 0) > 0 else 0
                 label = k[:55] + '…' if len(k) > 55 else k
                 st.markdown(f"""
                 <div style='margin-bottom:10px;'>
@@ -801,12 +823,15 @@ with tab4:
         st.markdown("<div class='section-header'>Producteurs de données</div>", unsafe_allow_html=True)
         fig_pr = fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base)
         if fig_pr:
-            st.plotly_chart(fig_pr, use_container_width=True)
+            try:
+                st.plotly_chart(fig_pr, use_container_width=True)
+            except Exception as e:
+                st.warning(f'⚠️ {e}')
 
         if fmt == 'ADES' and s_full.get('types_point'):
             st.markdown("<div class='section-header'>Types de points de mesure</div>", unsafe_allow_html=True)
             for k, v in s_full['types_point'].items():
-                pct = v / s_full['n_mesures'] * 100
+                pct = (v / s_full['n_mesures'] * 100) if s_full.get('n_mesures', 0) > 0 else 0
                 st.markdown(f"""
                 <div style='margin-bottom:10px;'>
                     <div style='font-size:0.8rem;color:#8b949e;margin-bottom:3px;'>{k}</div>
