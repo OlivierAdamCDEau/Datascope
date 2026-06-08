@@ -42,10 +42,10 @@ section[data-testid="stSidebar"] * {
     color: #c9d1d9 !important;
 }
 
-/* Masquer le bouton deploy et menu */
+/* Masquer le bouton deploy, menu et footer */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
+/* NE PAS masquer header — contient le bouton d'ouverture de la sidebar */
 
 /* Titre principal */
 .main-title {
@@ -575,8 +575,9 @@ if uploaded is None:
 
     st.markdown("""
     <div class='info-banner'>
-    Chargez un fichier CSV Naïades ou ADES via le panneau latéral pour générer automatiquement
-    un tableau de bord synthétique : inventaire des stations, paramètres, supports, campagnes,
+    👈 <b>Ouvrez le panneau latéral gauche</b> (flèche <code>&gt;</code> en haut à gauche si fermé)
+    pour charger votre fichier CSV Naïades ou ADES.<br><br>
+    Le tableau de bord s'affiche automatiquement : stations, paramètres, supports, campagnes,
     couverture temporelle et qualité de la donnée.
     </div>
     """, unsafe_allow_html=True)
