@@ -609,8 +609,20 @@ if uploaded is None:
 # ─────────────────────────────────────────────
 # CHARGEMENT & PARSING
 # ─────────────────────────────────────────────
+# Persister les bytes dans session_state pour survivre aux reruns
+# (uploaded.read() ne fonctionne qu'une seule fois par upload)
+file_key = uploaded.name + str(uploaded.size)
+if 'file_key' not in st.session_state or st.session_state['file_key'] != file_key:
+    st.session_state['file_key']   = file_key
+    st.session_state['file_bytes'] = uploaded.read()
+
+file_bytes = st.session_state['file_bytes']
+
+if not file_bytes:
+    st.error("❌ Fichier vide ou illisible.")
+    st.stop()
+
 with st.spinner("Chargement… (patientez pour les fichiers volumineux)"):
-    file_bytes = uploaded.read()
     df_raw, detected_enc, detected_sep = load_data(file_bytes, uploaded.name)
 
 if df_raw is None:
@@ -646,13 +658,20 @@ all_supports = s_full.get('supports', [])
 with st.sidebar:
     st.markdown("---")
     if all_supports:
-        st.markdown("**🔽 Filtre support**")
+        st.markdown("**🔽 Filtre par support**")
+        st.markdown(
+            "<div style='font-size:0.72rem;color:#7d8590;margin-bottom:6px;'>"
+            "Actif sur les onglets 1 et 2. Tout décocher = données vides.</div>",
+            unsafe_allow_html=True
+        )
         sel_supports = st.multiselect(
             "Supports à inclure",
             options=all_supports,
             default=all_supports,
-            help="Filtre actif sur les onglets Temporalité et Stations"
+            help="Filtre actif sur les onglets Temporalité et Stations. Sélectionner un ou plusieurs supports."
         )
+        if not sel_supports:
+            st.warning("⚠️ Aucun support sélectionné — sélectionnez au moins un support.")
     else:
         sel_supports = []
 
