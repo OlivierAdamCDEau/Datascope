@@ -95,25 +95,50 @@ THEMES_EXPORT = {
 }
 
 FORMATS_PAGE = {
-    # w_ratio : indicatif visuel (Streamlit est toujours pleine largeur)
-    # h_base  : hauteur de base des graphiques en px
-    # h_kpi   : hauteur cartouche KPI
-    # kpi_val_size / kpi_lbl_size : polices cartouche (multip. de fsize)
-    "PowerPoint paysage (33 × 19 cm)": dict(h_base=420, h_kpi=170, kpi_val_mult=2.8, kpi_lbl_mult=0.95),
-    "Word A4 portrait (16 × 12 cm)":   dict(h_base=520, h_kpi=155, kpi_val_mult=2.4, kpi_lbl_mult=0.90),
-    "Carré (rapport web)":              dict(h_base=600, h_kpi=160, kpi_val_mult=2.6, kpi_lbl_mult=0.92),
-    "Demi-page A4 paysage":             dict(h_base=460, h_kpi=145, kpi_val_mult=2.2, kpi_lbl_mult=0.88),
+    # h_base       : hauteur de base des graphiques (px dans Streamlit)
+    # h_kpi        : hauteur cartouche chiffres clés (px)
+    # kpi_val_mult : multiplicateur fsize pour la valeur numérique
+    # kpi_lbl_mult : multiplicateur fsize pour le libellé
+    # margin       : marges fixes l/r/t/b (px) — indépendantes de fsize
+    # export_w/h   : dimensions du PNG exporté (px × scale)
+    "PowerPoint paysage (33 × 19 cm)": dict(
+        h_base=400, h_kpi=165,
+        kpi_val_mult=2.6, kpi_lbl_mult=0.92,
+        margin=dict(l=70, r=40, t=55, b=65),
+        export_w=1600, export_h=500, export_scale=2,
+    ),
+    "Word / A4 portrait (15 × 10 cm)": dict(
+        h_base=680, h_kpi=155,
+        kpi_val_mult=2.3, kpi_lbl_mult=0.88,
+        margin=dict(l=65, r=35, t=50, b=60),
+        export_w=1200, export_h=800, export_scale=2,
+    ),
+    "Demi-page A4 portrait (15 × 7 cm)": dict(
+        h_base=500, h_kpi=145,
+        kpi_val_mult=2.1, kpi_lbl_mult=0.85,
+        margin=dict(l=60, r=30, t=48, b=55),
+        export_w=1200, export_h=580, export_scale=2,
+    ),
+    "Carré (présentation web)": dict(
+        h_base=580, h_kpi=160,
+        kpi_val_mult=2.5, kpi_lbl_mult=0.90,
+        margin=dict(l=65, r=35, t=52, b=60),
+        export_w=1100, export_h=700, export_scale=2,
+    ),
 }
 
 # ─────────────────────────────────────────────
 # HELPERS THÈME
 # ─────────────────────────────────────────────
-def build_layout(theme, fsize, fig_h, title_text="", margin_top=None):
+def build_layout(theme, fsize, fig_h, title_text="", fmt_params=None, margin_top=None):
     t = THEMES_EXPORT[theme]
-    # Marges proportionnelles à la taille de police
-    mt = margin_top if margin_top is not None else max(45, fsize * 4)
-    ml = max(50, fsize * 5)
-    mb = max(50, fsize * 5)
+    if fmt_params and 'margin' in fmt_params:
+        m = fmt_params['margin']
+        mt = margin_top if margin_top is not None else m['t']
+        mg = dict(l=m['l'], r=m['r'], t=mt, b=m['b'])
+    else:
+        mt = margin_top if margin_top is not None else 52
+        mg = dict(l=68, r=36, t=mt, b=62)
     return dict(
         paper_bgcolor=t['paper_bgcolor'],
         plot_bgcolor=t['plot_bgcolor'],
@@ -121,7 +146,7 @@ def build_layout(theme, fsize, fig_h, title_text="", margin_top=None):
         title=dict(text=title_text, font=dict(size=max(fsize+2, 13), color=t['title_color']),
                    x=0, xanchor='left'),
         height=fig_h,
-        margin=dict(l=ml, r=30, t=mt, b=mb),
+        margin=mg,
     )
 
 def axis_style(theme, fsize=11, extra=None):
@@ -263,7 +288,7 @@ def stats_ades(df, support_filter=None):
 # ─────────────────────────────────────────────
 # GRAPHIQUES
 # ─────────────────────────────────────────────
-def fig_timeline(s, palette, theme, fsize, fig_h):
+def fig_timeline(s, palette, theme, fsize, fig_h, fmt_params=None):
     mpa = {k:v for k,v in s.get('mesures_par_annee',{}).items() if k == k}  # filtre NaN
     if not mpa:
         return None
@@ -291,7 +316,12 @@ def fig_timeline(s, palette, theme, fsize, fig_h):
         legend=dict(orientation='h', y=1.06, x=0, bgcolor='rgba(0,0,0,0)',
                     font=dict(size=fsize-1, color=t['font_color'])),
         height=fig_h, barmode='overlay',
-        margin=dict(l=60, r=40, t=60, b=60),
+        margin=dict(
+            l=fmt_params['margin']['l'] if fmt_params else 68,
+            r=fmt_params['margin']['r']+20 if fmt_params else 56,
+            t=fmt_params['margin']['t']+8 if fmt_params else 60,
+            b=fmt_params['margin']['b'] if fmt_params else 62,
+        ),
     )
     ax = axis_style(theme, fsize)
     fig.update_xaxes(**ax, dtick=5, title_text="Année")
@@ -306,7 +336,7 @@ def fig_timeline(s, palette, theme, fsize, fig_h):
     return fig
 
 
-def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
+def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h, fmt_params=None):
     try:
         col_st = s['col_station']
         df_hm = df.dropna(subset=[col_st, 'année']).copy()
@@ -317,23 +347,45 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
         top = pivot.sum(axis=1).nlargest(20).index
         pivot = pivot.loc[top]
         t = THEMES_EXPORT[theme]
-        # Colorscale adaptée au fond
+        # Transformation log pour faire ressortir les faibles densités
+        pivot_log = np.log1p(pivot.values)  # log(1+x) : 0 reste 0, faibles valeurs ressortent
+
+        # Colorscale : contraste fort même sur fond blanc
         if 'sombre' in theme.lower():
-            cscale = [[0,'#161b22'],[0.01,'#1f2937'],[0.3, palette[1]],[1, palette[0]]]
+            cscale = [
+                [0.00, '#0d1117'],
+                [0.05, '#1f2937'],
+                [0.25, palette[1]],
+                [0.65, palette[0]],
+                [1.00, '#ffffff'],
+            ]
         else:
-            cscale = [[0,'#f5f5f5'],[0.05,'#e3f2fd'],[0.4, palette[2]],[1, palette[0]]]
+            # Fond blanc : partir d'un gris très clair vers la couleur pleine
+            # — évite le piège du bleu pâle quasi-blanc
+            cscale = [
+                [0.00, '#f0f0f0'],   # vide / zéro : gris très clair
+                [0.08, '#d0e8ff'] if palette[0].startswith('#1') else [0.08, '#d5f0d5'],
+                [0.30, palette[3] if len(palette)>3 else palette[-1]],
+                [0.70, palette[1]],
+                [1.00, palette[0]],
+            ]
 
         fig = px.imshow(
-            pivot, color_continuous_scale=cscale, aspect='auto',
-            labels=dict(x='Année', y='Station', color='Mesures'),
+            pivot_log, color_continuous_scale=cscale, aspect='auto',
+            labels=dict(x='Année', y='Station', color='log(Mesures+1)'),
         )
         fig.update_layout(
             paper_bgcolor=t['paper_bgcolor'], plot_bgcolor=t['plot_bgcolor'],
             font=dict(family='DM Sans', color=t['font_color'], size=fsize),
             title=dict(text="Couverture temporelle par station (Top 20)",
                        font=dict(size=fsize+2, color=t['title_color']), x=0),
-            height=fig_h + 100,
-            margin=dict(l=20, r=20, t=50, b=40),
+            height=fig_h + 120,
+            margin=dict(
+                l=fmt_params['margin']['l'] if fmt_params else 20,
+                r=fmt_params['margin']['r']+60 if fmt_params else 80,
+                t=fmt_params['margin']['t'] if fmt_params else 50,
+                b=fmt_params['margin']['b'] if fmt_params else 40,
+            ),
             coloraxis_colorbar=dict(
                 title="Mesures", thickness=12, len=0.7,
                 tickfont=dict(color=t['text_color'], size=fsize-2),
@@ -348,7 +400,7 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
         return None
 
 
-def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
+def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h, fmt_params=None):
     stations = list(s.get('mesures_par_station', {}).keys())[:25]
     if not stations:
         return None
@@ -386,7 +438,12 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
         font=dict(family='DM Sans', color=t['font_color'], size=fsize),
         title=dict(text="Hétérogénéité inter-stations  (taille ∝ nb mesures)",
                    font=dict(size=fsize+2, color=t['title_color']), x=0),
-        height=fig_h + 50, margin=dict(l=60, r=20, t=55, b=60),
+        height=fig_h + 60, margin=dict(
+            l=fmt_params['margin']['l'] if fmt_params else 68,
+            r=fmt_params['margin']['r']+60 if fmt_params else 80,
+            t=fmt_params['margin']['t']+5 if fmt_params else 58,
+            b=fmt_params['margin']['b'] if fmt_params else 62,
+        ),
     )
     ax = axis_style(theme, fsize)
     fig.update_xaxes(**ax, title='Années actives')
@@ -394,7 +451,7 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
     return fig
 
 
-def fig_supports_params(s, palette, theme, fsize, fig_h):
+def fig_supports_params(s, palette, theme, fsize, fig_h, fmt_params=None):
     data = s.get('params_par_support', {})
     if not data:
         return None
@@ -412,7 +469,7 @@ def fig_supports_params(s, palette, theme, fsize, fig_h):
         textfont=dict(color=bar_textcolor(theme), size=fsize-1),
         textposition='outside',
     ))
-    fig.update_layout(**build_layout(theme, fsize, max(fig_h, len(labels)*max(40,fsize*3)), "Paramètres par support"))
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, len(labels)*max(40,fsize*3)), "Paramètres par support", fmt_params))
     fig.update_xaxes(**axis_style(theme, fsize), title='Nb paramètres uniques')
     fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
     return fig
@@ -457,7 +514,7 @@ def fig_qualite(s, palette, theme, fsize, fig_h):
     return fig
 
 
-def fig_producteurs(s, palette, theme, fsize, fig_h):
+def fig_producteurs(s, palette, theme, fsize, fig_h, fmt_params=None):
     prod = s.get('producteurs', {})
     if not prod:
         return None
@@ -475,13 +532,13 @@ def fig_producteurs(s, palette, theme, fsize, fig_h):
         textfont=dict(color=bar_textcolor(theme), size=fsize-1),
         textposition='outside',
     ))
-    fig.update_layout(**build_layout(theme, fsize, fig_h, "Répartition par producteur"))
+    fig.update_layout(**build_layout(theme, fsize, fig_h, "Répartition par producteur", fmt_params))
     fig.update_xaxes(**axis_style(theme, fsize), tickangle=-30)
     fig.update_yaxes(**axis_style(theme, fsize), title='Mesures')
     return fig
 
 
-def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
+def fig_top_params(df, s, palette, theme, fsize, fig_h, fmt_params=None, n=20):
     col = s['col_param']
     top = df[col].value_counts().head(n)
     t = THEMES_EXPORT[theme]
@@ -497,7 +554,7 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
         textfont=dict(color=bar_textcolor(theme), size=max(8, fsize-2)),
         textposition='outside',
     ))
-    fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(24,fsize*2)), f"Top {n} paramètres les plus mesurés"))
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(24,fsize*2)), f"Top {n} paramètres les plus mesurés", fmt_params))
     fig.update_xaxes(**axis_style(theme, fsize), title='Nb mesures')
     fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
     return fig
@@ -583,9 +640,9 @@ def render_kpis(s, palette, theme, fsize, fmt_params, source_label, annee_min, a
             "toImageButtonOptions": {
                 "format": "png",
                 "filename": f"kpi_{filename.replace('.csv','').replace(' ','_')}",
-                "height": fmt_params['h_kpi'] * 2,
-                "width": 1400,
-                "scale": 3,
+                "height": fmt_params.get('export_h', fmt_params['h_kpi'] * 2),
+                "width": fmt_params.get('export_w', 1400),
+                "scale": fmt_params.get('export_scale', 3),
             },
             "modeBarButtonsToRemove": [
                 "zoom2d","pan2d","select2d","lasso2d",
@@ -652,7 +709,12 @@ with st.sidebar:
     sel_format = st.selectbox("Format cible", list(FORMATS_PAGE.keys()), index=0,
         help="Détermine les proportions et hauteurs des figures")
     fmt_params = FORMATS_PAGE[sel_format]
-    fig_h_base = fmt_params['h_base']
+    fig_h_base = st.slider(
+        "Hauteur des graphiques (px)",
+        min_value=300, max_value=1200,
+        value=fmt_params['h_base'], step=20,
+        help="Ajuster si les libellés se chevauchent ou si le graphique est trop aplati"
+    )
 
     fsize = st.slider("Taille de police (pt)", 9, 18, 11)
 
@@ -859,7 +921,7 @@ with tab1:
                     unsafe_allow_html=True)
 
     st.markdown("<div class='section-header'>Évolution temporelle</div>", unsafe_allow_html=True)
-    fig_t = fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
+    fig_t = fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base, fmt_params)
     if fig_t:
         try:
             st.plotly_chart(fig_t, use_container_width=True)
@@ -867,7 +929,7 @@ with tab1:
             st.warning(f'⚠️ Impossible d\'afficher ce graphique : {e}')
 
     st.markdown("<div class='section-header'>Couverture par station</div>", unsafe_allow_html=True)
-    fig_hm = fig_heatmap_stations(df_filt, s_filt, fmt, sel_palette, sel_theme, fsize, fig_h_base)
+    fig_hm = fig_heatmap_stations(df_filt, s_filt, fmt, sel_palette, sel_theme, fsize, fig_h_base, fmt_params)
     if fig_hm:
         try:
             st.plotly_chart(fig_hm, use_container_width=True)
@@ -889,7 +951,7 @@ with tab2:
     Position : nb d'<b>années actives</b> (X) × nb de <b>paramètres uniques</b> (Y).
     </div>""", unsafe_allow_html=True)
 
-    fig_het = fig_stations_heterogeneite(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
+    fig_het = fig_stations_heterogeneite(s_filt, sel_palette, sel_theme, fsize, fig_h_base, fmt_params)
     if fig_het:
         try:
             st.plotly_chart(fig_het, use_container_width=True)
@@ -913,7 +975,7 @@ with tab3:
         st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
         # Paramètres par support : filtré si filtre actif
         s_for_sup = s_filt if support_filter else s_full
-        fig_sp = fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base)
+        fig_sp = fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base, fmt_params)
         if fig_sp:
             try:
                 st.plotly_chart(fig_sp, use_container_width=True)
@@ -936,7 +998,7 @@ with tab3:
         # Utilise les données filtrées si un filtre support est actif
         df_for_params = df_filt if support_filter else df_full
         s_for_params  = s_filt  if support_filter else s_full
-        fig_tp = fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, n=n_top)
+        fig_tp = fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, fmt_params, n=n_top)
         try:
             st.plotly_chart(fig_tp, use_container_width=True)
         except Exception as e:
@@ -971,7 +1033,7 @@ with tab4:
 
     with col_p:
         st.markdown("<div class='section-header'>Producteurs de données</div>", unsafe_allow_html=True)
-        fig_pr = fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base)
+        fig_pr = fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base, fmt_params)
         if fig_pr:
             try:
                 st.plotly_chart(fig_pr, use_container_width=True)
