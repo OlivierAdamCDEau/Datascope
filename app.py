@@ -105,25 +105,25 @@ FORMATS_PAGE = {
         h_base=400, h_kpi=165,
         kpi_val_mult=2.6, kpi_lbl_mult=0.92,
         margin=dict(l=70, r=40, t=55, b=65),
-        export_w=1600, export_h=500, export_scale=2,
+        export_w_cm=24, export_scale=2,
     ),
-    "Word / A4 portrait (15 × 10 cm)": dict(
+    "Word / A4 portrait (16 × 10 cm)": dict(
         h_base=680, h_kpi=155,
         kpi_val_mult=2.3, kpi_lbl_mult=0.88,
         margin=dict(l=65, r=35, t=50, b=60),
-        export_w=1200, export_h=800, export_scale=2,
+        export_w_cm=16, export_scale=2,
     ),
-    "Demi-page A4 portrait (15 × 7 cm)": dict(
+    "Demi-page A4 portrait (16 × 7 cm)": dict(
         h_base=500, h_kpi=145,
         kpi_val_mult=2.1, kpi_lbl_mult=0.85,
         margin=dict(l=60, r=30, t=48, b=55),
-        export_w=1200, export_h=580, export_scale=2,
+        export_w_cm=16, export_scale=2,
     ),
     "Carré (présentation web)": dict(
-        h_base=580, h_kpi=160,
+        h_base=560, h_kpi=160,
         kpi_val_mult=2.5, kpi_lbl_mult=0.90,
         margin=dict(l=65, r=35, t=52, b=60),
-        export_w=1100, export_h=700, export_scale=2,
+        export_w_cm=18, export_scale=2,
     ),
 }
 
@@ -371,8 +371,12 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h, fmt_params=No
             ]
 
         fig = px.imshow(
-            pivot_log, color_continuous_scale=cscale, aspect='auto',
-            labels=dict(x='Année', y='Station', color='log(Mesures+1)'),
+            pivot_log,
+            x=[str(c) for c in pivot.columns],   # années (int → str pour affichage)
+            y=pivot.index.tolist(),               # noms de stations conservés
+            color_continuous_scale=cscale,
+            aspect='auto',
+            labels=dict(x='Année', y='Station', color='Mesures (log)'),
         )
         fig.update_layout(
             paper_bgcolor=t['paper_bgcolor'], plot_bgcolor=t['plot_bgcolor'],
@@ -387,8 +391,14 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h, fmt_params=No
                 b=fmt_params['margin']['b'] if fmt_params else 40,
             ),
             coloraxis_colorbar=dict(
-                title="Mesures", thickness=12, len=0.7,
-                tickfont=dict(color=t['text_color'], size=fsize-2),
+                title="Mesures",
+                thickness=12, len=0.7,
+                # Reconvertir log → vraies valeurs sur l'échelle colorbar
+                tickvals=[np.log1p(v) for v in [0,1,5,10,50,100,500,1000,5000]
+                          if np.log1p(v) <= pivot_log.max()],
+                ticktext=[str(v) for v in [0,1,5,10,50,100,500,1000,5000]
+                          if np.log1p(v) <= pivot_log.max()],
+                tickfont=dict(color=t['text_color'], size=max(7,fsize-2)),
                 title_font=dict(color=t['text_color'], size=fsize-1),
             ),
         )
@@ -415,11 +425,36 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h, fmt_params=None)
     else:
         cscale = [[0, palette[4] if len(palette) > 4 else '#90CAF9'],[1, palette[0]]]
 
+    # Filtre anti-superposition des labels :
+    # on n'affiche le label que si aucun autre point n'est trop proche
+    sizes_px = [m/max_m*55+10 for m in mesures]
+    x_range = max(annees) - min(annees) if len(annees) > 1 else 1
+    y_range = max(params) - min(params) if len(params) > 1 else 1
+    show_label = []
+    for i in range(len(stations)):
+        too_close = False
+        for j in range(len(stations)):
+            if i == j:
+                continue
+            dx = abs(annees[i] - annees[j]) / (x_range + 1e-9)
+            dy = abs(params[i] - params[j]) / (y_range + 1e-9)
+            dist = (dx**2 + dy**2) ** 0.5
+            min_dist = 0.08 + (sizes_px[i] + sizes_px[j]) / 2 / 600
+            if dist < min_dist:
+                too_close = True
+                break
+        show_label.append(not too_close)
+
+    labels_display = [
+        (st[:18]+'…' if len(st)>18 else st) if show_label[i] else ''
+        for i, st in enumerate(stations)
+    ]
+
     fig = go.Figure(go.Scatter(
         x=annees, y=params,
         mode='markers+text',
         marker=dict(
-            size=[m/max_m*55+10 for m in mesures],
+            size=sizes_px,
             color=mesures, colorscale=cscale, showscale=True,
             colorbar=dict(title="Mesures", thickness=12, len=0.65,
                           tickfont=dict(color=t['text_color'], size=fsize-2),
@@ -427,10 +462,10 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h, fmt_params=None)
             line=dict(color=palette[0], width=1),
             opacity=0.85,
         ),
-        text=[st.split(' ')[-1] if len(st) > 22 else st for st in stations],
+        text=labels_display,
         textposition='top center',
-        textfont=dict(size=max(8, fsize-3), color=t['text_color']),
-        hovertemplate='<b>%{customdata}</b><br>Années: %{x}<br>Paramètres: %{y}<extra></extra>',
+        textfont=dict(size=max(7, fsize-3), color=t['text_color']),
+        hovertemplate='<b>%{customdata}</b><br>Années actives: %{x}<br>Paramètres: %{y}<extra></extra>',
         customdata=stations,
     ))
     fig.update_layout(
@@ -561,77 +596,93 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, fmt_params=None, n=20):
 
 
 def make_kpi_figure(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename=""):
-    """Génère la cartouche KPI comme figure Plotly (exportable PNG)."""
+    """
+    Cartouche KPI en coordonnées data (range 0-N × 0-1).
+    Shapes et annotations sur le même référentiel → pas de décalage.
+    """
     t = THEMES_EXPORT[theme]
-    accent = palette[0]
+    accent   = palette[0]
+    bg_paper = t['paper_bgcolor'] if t['paper_bgcolor'] not in ('rgba(0,0,0,0)', 'transparent') else '#161b22'
+    border_c = '#484f58' if 'sombre' in theme.lower() else '#d0d0d0'
 
     items = [
-        ("Stations",    s.get('n_stations', 0)),
-        ("Paramètres",  s.get('n_parametres', 0)),
-        ("Campagnes",   s.get('n_campagnes', 0)),
-        ("Années",      s.get('n_annees', 0)),
-        ("Mesures",     s.get('n_mesures', 0)),
-        ("Supports",    s.get('n_supports', 0)),
+        ("Stations",   s.get('n_stations', 0)),
+        ("Paramètres", s.get('n_parametres', 0)),
+        ("Campagnes",  s.get('n_campagnes', 0)),
+        ("Années",     s.get('n_annees', 0)),
+        ("Mesures",    s.get('n_mesures', 0)),
+        ("Supports",   s.get('n_supports', 0)),
     ]
-    n = len(items)
+    N = len(items)
+
+    # Tailles de police calées sur fsize
+    val_size = max(14, int(fsize * fmt_params.get('kpi_val_mult', 2.4)))
+    lbl_size = max(7,  int(fsize * fmt_params.get('kpi_lbl_mult', 0.88)))
+    foot_size = max(7, fsize - 2)
 
     fig = go.Figure()
 
-    # Fond des cellules (rectangles alternés)
-    for i in range(n):
-        x0, x1 = i / n, (i + 1) / n
-        # Trait coloré en haut
-        fig.add_shape(type="rect", x0=x0+0.005, x1=x1-0.005, y0=0.88, y1=0.92,
-                      fillcolor=accent, line_width=0, xref="paper", yref="paper")
-        # Fond carte
-        bg = t['paper_bgcolor'] if t['paper_bgcolor'] not in ('rgba(0,0,0,0)', 'transparent') else '#161b22'
-        fig.add_shape(type="rect", x0=x0+0.005, x1=x1-0.005, y0=0.05, y1=0.88,
-                      fillcolor=bg,
-                      line=dict(color='#30363d' if 'sombre' in theme.lower() else '#e0e0e0', width=1),
-                      xref="paper", yref="paper")
+    # Coordonnées data : x ∈ [0, N], y ∈ [0, 1]
+    # → shapes et annotations parfaitement alignés quelle que soit la hauteur
+    pad = 0.04  # espace entre cartes
 
-    # Valeurs (grandes)
-    for i, (label, val) in enumerate(items):
-        cx = (i + 0.5) / n
+    for i in range(N):
+        x0, x1 = i + pad, i + 1 - pad
+        # Barre colorée en haut
+        fig.add_shape(
+            type="rect", x0=x0, x1=x1, y0=0.84, y1=0.98,
+            fillcolor=accent, line_width=0,
+        )
+        # Corps de la carte
+        fig.add_shape(
+            type="rect", x0=x0, x1=x1, y0=0.02, y1=0.84,
+            fillcolor=bg_paper,
+            line=dict(color=border_c, width=1),
+        )
+        # Valeur numérique
+        val = items[i][1]
         val_str = f"{val:,}".replace(',', '\u202f') if isinstance(val, int) else str(val)
         fig.add_annotation(
-            x=cx, y=0.58, xref="paper", yref="paper",
+            x=i + 0.5, y=0.57,
             text=f"<b>{val_str}</b>",
-            font=dict(size=max(16, int(fsize * fmt_params['kpi_val_mult'])), color=t['title_color'], family='DM Serif Display'),
-            showarrow=False, align="center",
+            font=dict(size=val_size, color=t['title_color'], family='DM Serif Display'),
+            showarrow=False, align="center", xanchor="center", yanchor="middle",
         )
+        # Libellé
         fig.add_annotation(
-            x=cx, y=0.22, xref="paper", yref="paper",
-            text=label.upper(),
-            font=dict(size=max(7, int(fsize * fmt_params['kpi_lbl_mult'])), color=t['text_color'], family='DM Sans'),
-            showarrow=False, align="center",
+            x=i + 0.5, y=0.20,
+            text=items[i][0].upper(),
+            font=dict(size=lbl_size, color=t['text_color'], family='DM Sans'),
+            showarrow=False, align="center", xanchor="center", yanchor="middle",
         )
 
-    # Titre source + période en bas
+    # Pied de cartouche (hors de la zone data, en paper coords)
     period = f"{annee_min} – {annee_max}"
     fname_clean = filename.replace('.csv','').replace('_',' ')
     fig.add_annotation(
-        x=0.5, y=-0.08, xref="paper", yref="paper",
-        text=f"<b>{fname_clean}</b>   ·   {source_label}   ·   {period}",
-        font=dict(size=max(7, fsize-2), color=t['text_color'], family='DM Sans'),
+        x=0.5, y=-0.10, xref="paper", yref="paper",
+        text=f"<b>{fname_clean}</b>  ·  {source_label}  ·  {period}",
+        font=dict(size=foot_size, color=t['text_color'], family='DM Sans'),
         showarrow=False, align="center",
     )
 
     fig.update_layout(
-        paper_bgcolor=t['paper_bgcolor'] if t['paper_bgcolor'] != 'rgba(0,0,0,0)' else '#0d1117',
+        paper_bgcolor=bg_paper,
         plot_bgcolor='rgba(0,0,0,0)',
         height=fmt_params['h_kpi'],
-        margin=dict(l=10, r=10, t=10, b=30),
-        xaxis=dict(visible=False, range=[0,1]),
-        yaxis=dict(visible=False, range=[0,1]),
+        margin=dict(l=8, r=8, t=8, b=28),
+        xaxis=dict(visible=False, range=[0, N], fixedrange=True),
+        yaxis=dict(visible=False, range=[0, 1],  fixedrange=True),
         showlegend=False,
     )
     return fig
 
 
-def render_kpis(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename=""):
+def render_kpis(s, palette, theme, fsize, fmt_params, fig_w_px, source_label, annee_min, annee_max, filename=""):
     """Affiche la cartouche KPI Plotly avec bouton de téléchargement PNG intégré."""
     fig = make_kpi_figure(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename)
+    # Hauteur export : proportionnelle à la largeur (ratio ≈ 1:4 pour une cartouche)
+    h_export = max(160, int(fig_w_px * 0.22))
     st.plotly_chart(
         fig,
         use_container_width=True,
@@ -640,9 +691,9 @@ def render_kpis(s, palette, theme, fsize, fmt_params, source_label, annee_min, a
             "toImageButtonOptions": {
                 "format": "png",
                 "filename": f"kpi_{filename.replace('.csv','').replace(' ','_')}",
-                "height": fmt_params.get('export_h', fmt_params['h_kpi'] * 2),
-                "width": fmt_params.get('export_w', 1400),
-                "scale": fmt_params.get('export_scale', 3),
+                "height": h_export,
+                "width":  fig_w_px,
+                "scale":  fmt_params.get('export_scale', 2),
             },
             "modeBarButtonsToRemove": [
                 "zoom2d","pan2d","select2d","lasso2d",
@@ -709,12 +760,29 @@ with st.sidebar:
     sel_format = st.selectbox("Format cible", list(FORMATS_PAGE.keys()), index=0,
         help="Détermine les proportions et hauteurs des figures")
     fmt_params = FORMATS_PAGE[sel_format]
-    fig_h_base = st.slider(
-        "Hauteur des graphiques (px)",
-        min_value=300, max_value=1200,
-        value=fmt_params['h_base'], step=20,
-        help="Ajuster si les libellés se chevauchent ou si le graphique est trop aplati"
-    )
+
+    # Tout en cm — conversion px ↔ cm à 150 dpi (qualité impression)
+    DPI   = 150
+    CM_PX = DPI / 2.54  # ≈ 59 px/cm
+
+    col_hw1, col_hw2 = st.columns(2)
+    with col_hw1:
+        fig_h_cm = st.slider(
+            "Hauteur (cm)", min_value=4, max_value=25,
+            value=round(fmt_params['h_base'] / CM_PX),
+            step=1,
+            help="Hauteur des graphiques (4–25 cm)"
+        )
+    with col_hw2:
+        fig_w_cm = st.slider(
+            "Largeur (cm)", min_value=8, max_value=30,
+            value=fmt_params.get('export_w_cm', 16),
+            step=1,
+            help="Largeur des graphiques (8–30 cm · 16 cm = A4 pleine largeur)"
+        )
+    # Conversion cm → px pour Plotly (hauteur affichage) et export PNG
+    fig_h_base     = int(fig_h_cm * CM_PX)
+    fig_w_px_export = int(fig_w_cm * CM_PX)
 
     fsize = st.slider("Taille de police (pt)", 9, 18, 11)
 
@@ -895,7 +963,7 @@ st.markdown(f"""
 """.replace(',', '\u202f'), unsafe_allow_html=True)
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-render_kpis(s_filt, sel_palette, sel_theme, fsize, fmt_params, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
+render_kpis(s_filt, sel_palette, sel_theme, fsize, fmt_params, fig_w_px_export, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
 
 if support_filter:
     st.markdown(f"""
