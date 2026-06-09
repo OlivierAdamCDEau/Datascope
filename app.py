@@ -487,25 +487,96 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
     return fig
 
 
-def render_kpis(s, palette):
+def make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filename=""):
+    """Génère la cartouche KPI comme figure Plotly (exportable PNG)."""
+    t = THEMES_EXPORT[theme]
     accent = palette[0]
+
     items = [
-        ("📍", s.get('n_stations', 0), "Stations"),
-        ("🔬", s.get('n_parametres', 0), "Paramètres"),
-        ("📋", s.get('n_campagnes', 0), "Campagnes"),
-        ("📅", s.get('n_annees', 0), "Années"),
-        ("📊", f"{s.get('n_mesures', 0):,}".replace(',', '\u202f'), "Mesures"),
-        ("🧪", s.get('n_supports', 0), "Supports"),
+        ("Stations",    s.get('n_stations', 0)),
+        ("Paramètres",  s.get('n_parametres', 0)),
+        ("Campagnes",   s.get('n_campagnes', 0)),
+        ("Années",      s.get('n_annees', 0)),
+        ("Mesures",     s.get('n_mesures', 0)),
+        ("Supports",    s.get('n_supports', 0)),
     ]
-    cols = st.columns(len(items))
-    for col, (icon, val, label) in zip(cols, items):
-        with col:
-            st.markdown(f"""
-            <div class="kpi-card" style="--accent: {accent}">
-                <div class="kpi-icon">{icon}</div>
-                <div class="kpi-value">{val}</div>
-                <div class="kpi-label">{label}</div>
-            </div>""", unsafe_allow_html=True)
+    n = len(items)
+
+    fig = go.Figure()
+
+    # Fond des cellules (rectangles alternés)
+    for i in range(n):
+        x0, x1 = i / n, (i + 1) / n
+        # Trait coloré en haut
+        fig.add_shape(type="rect", x0=x0+0.005, x1=x1-0.005, y0=0.88, y1=0.92,
+                      fillcolor=accent, line_width=0, xref="paper", yref="paper")
+        # Fond carte
+        bg = t['paper_bgcolor'] if t['paper_bgcolor'] not in ('rgba(0,0,0,0)', 'transparent') else '#161b22'
+        fig.add_shape(type="rect", x0=x0+0.005, x1=x1-0.005, y0=0.05, y1=0.88,
+                      fillcolor=bg,
+                      line=dict(color='#30363d' if 'sombre' in theme.lower() else '#e0e0e0', width=1),
+                      xref="paper", yref="paper")
+
+    # Valeurs (grandes)
+    for i, (label, val) in enumerate(items):
+        cx = (i + 0.5) / n
+        val_str = f"{val:,}".replace(',', '\u202f') if isinstance(val, int) else str(val)
+        fig.add_annotation(
+            x=cx, y=0.58, xref="paper", yref="paper",
+            text=f"<b>{val_str}</b>",
+            font=dict(size=28, color=t['title_color'], family='DM Serif Display'),
+            showarrow=False, align="center",
+        )
+        fig.add_annotation(
+            x=cx, y=0.22, xref="paper", yref="paper",
+            text=label.upper(),
+            font=dict(size=10, color=t['text_color'], family='DM Sans'),
+            showarrow=False, align="center",
+        )
+
+    # Titre source + période en bas
+    period = f"{annee_min} – {annee_max}"
+    fname_clean = filename.replace('.csv','').replace('_',' ')
+    fig.add_annotation(
+        x=0.5, y=-0.08, xref="paper", yref="paper",
+        text=f"<b>{fname_clean}</b>   ·   {source_label}   ·   {period}",
+        font=dict(size=10, color=t['text_color'], family='DM Sans'),
+        showarrow=False, align="center",
+    )
+
+    fig.update_layout(
+        paper_bgcolor=t['paper_bgcolor'] if t['paper_bgcolor'] != 'rgba(0,0,0,0)' else '#0d1117',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=160,
+        margin=dict(l=10, r=10, t=10, b=30),
+        xaxis=dict(visible=False, range=[0,1]),
+        yaxis=dict(visible=False, range=[0,1]),
+        showlegend=False,
+    )
+    return fig
+
+
+def render_kpis(s, palette, theme, source_label, annee_min, annee_max, filename=""):
+    """Affiche la cartouche KPI Plotly avec bouton de téléchargement PNG intégré."""
+    fig = make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filename)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "displaylogo": False,
+            "toImageButtonOptions": {
+                "format": "png",
+                "filename": f"kpi_{filename.replace('.csv','').replace(' ','_')}",
+                "height": 200,
+                "width": 1400,
+                "scale": 3,
+            },
+            "modeBarButtonsToRemove": [
+                "zoom2d","pan2d","select2d","lasso2d",
+                "zoomIn2d","zoomOut2d","autoScale2d","resetScale2d"
+            ],
+        }
+    )
 
 # ─────────────────────────────────────────────
 # CHARGEMENT
@@ -746,7 +817,7 @@ st.markdown(f"""
 """.replace(',', '\u202f'), unsafe_allow_html=True)
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-render_kpis(s_filt, sel_palette)
+render_kpis(s_filt, sel_palette, sel_theme, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
 
 if support_filter:
     st.markdown(f"""
@@ -824,7 +895,9 @@ with tab3:
     col_a, col_b = st.columns([1, 1])
     with col_a:
         st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
-        fig_sp = fig_supports_params(s_full, sel_palette, sel_theme, fsize, fig_h_base)
+        # Paramètres par support : filtré si filtre actif
+        s_for_sup = s_filt if support_filter else s_full
+        fig_sp = fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base)
         if fig_sp:
             try:
                 st.plotly_chart(fig_sp, use_container_width=True)
@@ -839,8 +912,15 @@ with tab3:
                             unsafe_allow_html=True)
     with col_b:
         st.markdown("<div class='section-header'>Top paramètres</div>", unsafe_allow_html=True)
+        if support_filter:
+            st.markdown(
+                f"<div class='filter-box'>🔽 Filtré — Support(s) : <b>{', '.join(support_filter)}</b></div>",
+                unsafe_allow_html=True)
         n_top = st.slider("Nombre de paramètres", 10, 50, 20, key='top_params')
-        fig_tp = fig_top_params(df_full, s_full, sel_palette, sel_theme, fsize, fig_h_base, n=n_top)
+        # Utilise les données filtrées si un filtre support est actif
+        df_for_params = df_filt if support_filter else df_full
+        s_for_params  = s_filt  if support_filter else s_full
+        fig_tp = fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, n=n_top)
         try:
             st.plotly_chart(fig_tp, use_container_width=True)
         except Exception as e:
