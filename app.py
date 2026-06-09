@@ -95,30 +95,45 @@ THEMES_EXPORT = {
 }
 
 FORMATS_PAGE = {
-    "PowerPoint paysage (33 × 19 cm)": dict(w_ratio=1.60, h_base=380),
-    "Word A4 portrait (16 × 12 cm)":   dict(w_ratio=1.00, h_base=340),
-    "Carré (rapport web)":              dict(w_ratio=1.00, h_base=420),
-    "Demi-page A4 paysage":             dict(w_ratio=1.40, h_base=280),
+    # w_ratio : indicatif visuel (Streamlit est toujours pleine largeur)
+    # h_base  : hauteur de base des graphiques en px
+    # h_kpi   : hauteur cartouche KPI
+    # kpi_val_size / kpi_lbl_size : polices cartouche (multip. de fsize)
+    "PowerPoint paysage (33 × 19 cm)": dict(h_base=420, h_kpi=170, kpi_val_mult=2.8, kpi_lbl_mult=0.95),
+    "Word A4 portrait (16 × 12 cm)":   dict(h_base=520, h_kpi=155, kpi_val_mult=2.4, kpi_lbl_mult=0.90),
+    "Carré (rapport web)":              dict(h_base=600, h_kpi=160, kpi_val_mult=2.6, kpi_lbl_mult=0.92),
+    "Demi-page A4 paysage":             dict(h_base=460, h_kpi=145, kpi_val_mult=2.2, kpi_lbl_mult=0.88),
 }
 
 # ─────────────────────────────────────────────
 # HELPERS THÈME
 # ─────────────────────────────────────────────
-def build_layout(theme, fsize, fig_h, title_text="", margin_top=50):
+def build_layout(theme, fsize, fig_h, title_text="", margin_top=None):
     t = THEMES_EXPORT[theme]
+    # Marges proportionnelles à la taille de police
+    mt = margin_top if margin_top is not None else max(45, fsize * 4)
+    ml = max(50, fsize * 5)
+    mb = max(50, fsize * 5)
     return dict(
         paper_bgcolor=t['paper_bgcolor'],
         plot_bgcolor=t['plot_bgcolor'],
         font=dict(family='DM Sans', color=t['font_color'], size=fsize),
-        title=dict(text=title_text, font=dict(size=fsize+2, color=t['title_color']), x=0, xanchor='left'),
+        title=dict(text=title_text, font=dict(size=max(fsize+2, 13), color=t['title_color']),
+                   x=0, xanchor='left'),
         height=fig_h,
-        margin=dict(l=60, r=30, t=margin_top, b=60),
+        margin=dict(l=ml, r=30, t=mt, b=mb),
     )
 
-def axis_style(theme, extra=None):
+def axis_style(theme, fsize=11, extra=None):
     t = THEMES_EXPORT[theme]
-    d = dict(gridcolor=t['grid_color'], linecolor=t['line_color'],
-             tickcolor=t['line_color'], color=t['text_color'])
+    d = dict(
+        gridcolor=t['grid_color'],
+        linecolor=t['line_color'],
+        tickcolor=t['line_color'],
+        color=t['text_color'],
+        tickfont=dict(size=max(7, fsize-2), color=t['text_color'], family='DM Sans'),
+        title_font=dict(size=fsize, color=t['text_color'], family='DM Sans'),
+    )
     if extra:
         d.update(extra)
     return d
@@ -278,14 +293,16 @@ def fig_timeline(s, palette, theme, fsize, fig_h):
         height=fig_h, barmode='overlay',
         margin=dict(l=60, r=40, t=60, b=60),
     )
-    ax = axis_style(theme)
-    fig.update_xaxes(**ax, dtick=5, title_text="Année", title_font_size=fsize-1)
+    ax = axis_style(theme, fsize)
+    fig.update_xaxes(**ax, dtick=5, title_text="Année")
     fig.update_yaxes(title_text="Nb mesures", secondary_y=False,
                      gridcolor=ax['gridcolor'], linecolor=ax['linecolor'],
-                     color=t['text_color'], title_font_size=fsize-1)
+                     tickfont=ax['tickfont'], title_font=ax['title_font'],
+                     color=t['text_color'])
     fig.update_yaxes(title_text="Nb campagnes", secondary_y=True,
                      gridcolor='rgba(0,0,0,0)', linecolor=ax['linecolor'],
-                     color=t['text_color'], title_font_size=fsize-1, showgrid=False)
+                     tickfont=ax['tickfont'], title_font=ax['title_font'],
+                     color=t['text_color'], showgrid=False)
     return fig
 
 
@@ -323,9 +340,9 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
                 title_font=dict(color=t['text_color'], size=fsize-1),
             ),
         )
-        ax = axis_style(theme)
+        ax = axis_style(theme, fsize)
         fig.update_xaxes(**ax, title='', dtick=5)
-        fig.update_yaxes(**ax, title='', tickfont=dict(size=max(8, fsize-3)))
+        fig.update_yaxes(**ax, title='')
         return fig
     except Exception:
         return None
@@ -371,9 +388,9 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
                    font=dict(size=fsize+2, color=t['title_color']), x=0),
         height=fig_h + 50, margin=dict(l=60, r=20, t=55, b=60),
     )
-    ax = axis_style(theme)
-    fig.update_xaxes(**ax, title='Années actives', title_font_size=fsize-1)
-    fig.update_yaxes(**ax, title='Paramètres uniques', title_font_size=fsize-1)
+    ax = axis_style(theme, fsize)
+    fig.update_xaxes(**ax, title='Années actives')
+    fig.update_yaxes(**ax, title='Paramètres uniques')
     return fig
 
 
@@ -395,9 +412,9 @@ def fig_supports_params(s, palette, theme, fsize, fig_h):
         textfont=dict(color=bar_textcolor(theme), size=fsize-1),
         textposition='outside',
     ))
-    fig.update_layout(**build_layout(theme, fsize, max(200, len(labels)*55), "Paramètres par support"))
-    fig.update_xaxes(**axis_style(theme), title='Nb paramètres uniques', title_font_size=fsize-1)
-    fig.update_yaxes(**axis_style(theme), categoryorder='total ascending')
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, len(labels)*max(40,fsize*3)), "Paramètres par support"))
+    fig.update_xaxes(**axis_style(theme, fsize), title='Nb paramètres uniques')
+    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
     return fig
 
 
@@ -459,8 +476,8 @@ def fig_producteurs(s, palette, theme, fsize, fig_h):
         textposition='outside',
     ))
     fig.update_layout(**build_layout(theme, fsize, fig_h, "Répartition par producteur"))
-    fig.update_xaxes(**axis_style(theme), tickangle=-30, tickfont=dict(size=max(8, fsize-2)))
-    fig.update_yaxes(**axis_style(theme), title='Mesures', title_font_size=fsize-1)
+    fig.update_xaxes(**axis_style(theme, fsize), tickangle=-30)
+    fig.update_yaxes(**axis_style(theme, fsize), title='Mesures')
     return fig
 
 
@@ -480,14 +497,13 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
         textfont=dict(color=bar_textcolor(theme), size=max(8, fsize-2)),
         textposition='outside',
     ))
-    fig.update_layout(**build_layout(theme, fsize, max(300, n*28), f"Top {n} paramètres les plus mesurés"))
-    fig.update_xaxes(**axis_style(theme), title='Nb mesures', title_font_size=fsize-1)
-    fig.update_yaxes(**axis_style(theme), tickfont=dict(size=max(7, fsize-3)),
-                     categoryorder='total ascending')
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(24,fsize*2)), f"Top {n} paramètres les plus mesurés"))
+    fig.update_xaxes(**axis_style(theme, fsize), title='Nb mesures')
+    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
     return fig
 
 
-def make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filename=""):
+def make_kpi_figure(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename=""):
     """Génère la cartouche KPI comme figure Plotly (exportable PNG)."""
     t = THEMES_EXPORT[theme]
     accent = palette[0]
@@ -524,13 +540,13 @@ def make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filen
         fig.add_annotation(
             x=cx, y=0.58, xref="paper", yref="paper",
             text=f"<b>{val_str}</b>",
-            font=dict(size=28, color=t['title_color'], family='DM Serif Display'),
+            font=dict(size=max(16, int(fsize * fmt_params['kpi_val_mult'])), color=t['title_color'], family='DM Serif Display'),
             showarrow=False, align="center",
         )
         fig.add_annotation(
             x=cx, y=0.22, xref="paper", yref="paper",
             text=label.upper(),
-            font=dict(size=10, color=t['text_color'], family='DM Sans'),
+            font=dict(size=max(7, int(fsize * fmt_params['kpi_lbl_mult'])), color=t['text_color'], family='DM Sans'),
             showarrow=False, align="center",
         )
 
@@ -540,14 +556,14 @@ def make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filen
     fig.add_annotation(
         x=0.5, y=-0.08, xref="paper", yref="paper",
         text=f"<b>{fname_clean}</b>   ·   {source_label}   ·   {period}",
-        font=dict(size=10, color=t['text_color'], family='DM Sans'),
+        font=dict(size=max(7, fsize-2), color=t['text_color'], family='DM Sans'),
         showarrow=False, align="center",
     )
 
     fig.update_layout(
         paper_bgcolor=t['paper_bgcolor'] if t['paper_bgcolor'] != 'rgba(0,0,0,0)' else '#0d1117',
         plot_bgcolor='rgba(0,0,0,0)',
-        height=160,
+        height=fmt_params['h_kpi'],
         margin=dict(l=10, r=10, t=10, b=30),
         xaxis=dict(visible=False, range=[0,1]),
         yaxis=dict(visible=False, range=[0,1]),
@@ -556,9 +572,9 @@ def make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filen
     return fig
 
 
-def render_kpis(s, palette, theme, source_label, annee_min, annee_max, filename=""):
+def render_kpis(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename=""):
     """Affiche la cartouche KPI Plotly avec bouton de téléchargement PNG intégré."""
-    fig = make_kpi_figure(s, palette, theme, source_label, annee_min, annee_max, filename)
+    fig = make_kpi_figure(s, palette, theme, fsize, fmt_params, source_label, annee_min, annee_max, filename)
     st.plotly_chart(
         fig,
         use_container_width=True,
@@ -567,7 +583,7 @@ def render_kpis(s, palette, theme, source_label, annee_min, annee_max, filename=
             "toImageButtonOptions": {
                 "format": "png",
                 "filename": f"kpi_{filename.replace('.csv','').replace(' ','_')}",
-                "height": 200,
+                "height": fmt_params['h_kpi'] * 2,
                 "width": 1400,
                 "scale": 3,
             },
@@ -817,7 +833,7 @@ st.markdown(f"""
 """.replace(',', '\u202f'), unsafe_allow_html=True)
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-render_kpis(s_filt, sel_palette, sel_theme, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
+render_kpis(s_filt, sel_palette, sel_theme, fsize, fmt_params, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
 
 if support_filter:
     st.markdown(f"""
