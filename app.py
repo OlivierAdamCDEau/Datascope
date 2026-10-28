@@ -137,6 +137,12 @@ def axis_style(theme, fsize=11, extra=None):
         d.update(extra)
     return d
 
+def darken(hex_color, f):
+    """Assombrit une couleur hexadécimale (f = 0 → inchangée, 1 → noir)."""
+    h = hex_color.lstrip('#')
+    r, g, b = (int(h[i:i+2], 16) for i in (0, 2, 4))
+    return '#{:02x}{:02x}{:02x}'.format(*(int(c * (1 - f)) for c in (r, g, b)))
+
 def bar_textcolor(theme):
     return THEMES_EXPORT[theme]['font_color']
 
@@ -332,10 +338,14 @@ def fig_timeline(s, palette, theme, fsize, fig_h):
                      gridcolor=ax['gridcolor'], linecolor=ax['linecolor'],
                      tickfont=ax['tickfont'], title_font=ax['title_font'],
                      color=t['text_color'])
+    # Axe secondaire : départ à 0, graduations entières (pas « rond » : 1, 2, 5, 10, 20…)
+    camp_max = max(camp) if camp else 1
+    pas = next((p for p in [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000] if camp_max / p <= 6), 1000)
     fig.update_yaxes(title_text="Nb campagnes", secondary_y=True,
                      gridcolor='rgba(0,0,0,0)', linecolor=ax['linecolor'],
                      tickfont=ax['tickfont'], title_font=ax['title_font'],
-                     color=t['text_color'], showgrid=False)
+                     color=t['text_color'], showgrid=False,
+                     rangemode='tozero', range=[0, camp_max * 1.08], tick0=0, dtick=pas, tickformat='d')
     return fig
 
 
@@ -351,27 +361,18 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
         pivot = pivot.loc[top]
         t = THEMES_EXPORT[theme]
         # Transformation log pour faire ressortir les faibles densités
-        pivot_log = np.log1p(pivot.values)  # log(1+x) : 0 reste 0, faibles valeurs ressortent
+        pivot_log = np.log1p(pivot.values)  # log(1+x) : les faibles densités ressortent
+        # Années sans mesure → case vide (fond neutre), bien distincte de la plus faible densité
+        pivot_log = np.where(pivot.values > 0, pivot_log, np.nan)
 
-        # Colorscale : contraste fort même sur fond blanc
+        # Gradient sur toute l'étendue de la palette, du plus clair au très foncé
+        fonce = darken(palette[0], 0.45)
         if 'sombre' in theme.lower():
-            cscale = [
-                [0.00, '#0d1117'],
-                [0.05, '#1f2937'],
-                [0.25, palette[1]],
-                [0.65, palette[0]],
-                [1.00, '#ffffff'],
-            ]
+            vide = '#161b22'
+            cscale = [[0.00, fonce], [0.35, palette[1]], [0.70, palette[3]], [1.00, '#ffffff']]
         else:
-            # Fond blanc : partir d'un gris très clair vers la couleur pleine
-            # — évite le piège du bleu pâle quasi-blanc
-            cscale = [
-                [0.00, '#f0f0f0'],   # vide / zéro : gris très clair
-                [0.08, '#d0e8ff'] if palette[0].startswith('#1') else [0.08, '#d5f0d5'],
-                [0.30, palette[3] if len(palette)>3 else palette[-1]],
-                [0.70, palette[1]],
-                [1.00, palette[0]],
-            ]
+            vide = '#eeeeee'
+            cscale = [[0.00, palette[4] if len(palette) > 4 else palette[-1]], [0.30, palette[3]], [0.60, palette[1]], [1.00, fonce]]
 
         fig = px.imshow(
             pivot_log,
@@ -381,8 +382,10 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
             aspect='auto',
             labels=dict(x='Année', y='Station', color='Mesures (log)'),
         )
+        vmax = np.nanmax(pivot_log)
+        ticks = [v for v in [1, 5, 10, 50, 100, 500, 1000, 5000, 10000] if np.log1p(v) <= vmax]
         fig.update_layout(
-            paper_bgcolor=t['paper_bgcolor'], plot_bgcolor=t['plot_bgcolor'],
+            paper_bgcolor=t['paper_bgcolor'], plot_bgcolor=vide,
             font=dict(family='DM Sans', color=t['font_color'], size=fsize),
             title=dict(text="Couverture temporelle par station (Top 20)",
                        font=dict(size=fsize+2, color=t['title_color']), x=0),
@@ -392,10 +395,8 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
                 title="Mesures",
                 thickness=12, len=0.7,
                 # Reconvertir log → vraies valeurs sur l'échelle colorbar
-                tickvals=[np.log1p(v) for v in [0,1,5,10,50,100,500,1000,5000]
-                          if np.log1p(v) <= pivot_log.max()],
-                ticktext=[str(v) for v in [0,1,5,10,50,100,500,1000,5000]
-                          if np.log1p(v) <= pivot_log.max()],
+                tickvals=[np.log1p(v) for v in ticks],
+                ticktext=[str(v) for v in ticks],
                 tickfont=dict(color=t['text_color'], size=max(7,fsize-2)),
                 title_font=dict(color=t['text_color'], size=fsize-1),
             ),
@@ -441,12 +442,15 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
             if dist < min_dist:
                 too_close = True
                 break
-        show_label.append(not too_close)
+        # Les plus grosses bulles (stations triées par nb de mesures) sont toujours étiquetées
+        show_label.append(i < 5 or not too_close)
 
     labels_display = [
-        (st[:18]+'…' if len(st)>18 else st) if show_label[i] else ''
+        (st[:22]+'…' if len(st)>22 else st) if show_label[i] else ''
         for i, st in enumerate(stations)
     ]
+    # Étiquettes alternées dessus / dessous pour limiter les chevauchements
+    text_pos = ['top center' if i % 2 == 0 else 'bottom center' for i in range(len(stations))]
 
     fig = go.Figure(go.Scatter(
         x=annees, y=params,
@@ -461,7 +465,7 @@ def fig_stations_heterogeneite(s, palette, theme, fsize, fig_h):
             opacity=0.85,
         ),
         text=labels_display,
-        textposition='top center',
+        textposition=text_pos,
         textfont=dict(size=max(7, fsize-3), color=t['text_color']),
         hovertemplate='<b>%{customdata}</b><br>Années actives: %{x}<br>Paramètres: %{y}<extra></extra>',
         customdata=stations,
@@ -495,11 +499,12 @@ def fig_supports_params(s, palette, theme, fsize, fig_h):
         ),
         text=[f" {v}" for v in values],
         textfont=dict(color=bar_textcolor(theme), size=fsize-1),
-        textposition='outside',
+        textposition='outside', cliponaxis=False,
     ))
     fig.update_layout(**build_layout(theme, fsize, max(fig_h, len(labels)*max(40,fsize*3)), "Paramètres par support"))
+    fig.update_layout(margin=dict(l=MARGINS['l'], r=90, t=MARGINS['t'], b=MARGINS['b']))
     fig.update_xaxes(**axis_style(theme, fsize), title='Nb paramètres uniques')
-    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
+    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending', automargin=True)
     return fig
 
 
@@ -547,22 +552,24 @@ def fig_producteurs(s, palette, theme, fsize, fig_h):
     if not prod:
         return None
     labels = list(prod.keys())
-    short_labels = [k[:40]+'…' if len(k) > 40 else k for k in labels]
+    short_labels = [k[:60]+'…' if len(k) > 60 else k for k in labels]
     values = list(prod.values())
     n = len(labels)
     colors_p = [palette[i % len(palette)] for i in range(n)]
     t = THEMES_EXPORT[theme]
 
+    # Barres horizontales : les noms de producteurs, souvent longs, restent lisibles
     fig = go.Figure(go.Bar(
-        x=short_labels, y=values,
-        marker=dict(color=colors_p, line=dict(width=0)),
-        text=values,
+        y=short_labels[::-1], x=values[::-1], orientation='h',
+        marker=dict(color=colors_p[::-1], line=dict(width=0)),
+        text=[f" {v:,}".replace(',', ' ') for v in values[::-1]],
         textfont=dict(color=bar_textcolor(theme), size=fsize-1),
-        textposition='outside',
+        textposition='outside', cliponaxis=False,
     ))
-    fig.update_layout(**build_layout(theme, fsize, fig_h, "Répartition par producteur"))
-    fig.update_xaxes(**axis_style(theme, fsize), tickangle=-30)
-    fig.update_yaxes(**axis_style(theme, fsize), title='Mesures')
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(40, fsize*3)), "Répartition par producteur"))
+    fig.update_layout(margin=dict(l=MARGINS['l'], r=90, t=MARGINS['t'], b=MARGINS['b']))
+    fig.update_xaxes(**axis_style(theme, fsize), title='Mesures')
+    fig.update_yaxes(**axis_style(theme, fsize), automargin=True)
     return fig
 
 
@@ -580,11 +587,12 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
         ),
         text=[f" {v:,}".replace(',', '\u202f') for v in top.values],
         textfont=dict(color=bar_textcolor(theme), size=max(8, fsize-2)),
-        textposition='outside',
+        textposition='outside', cliponaxis=False,
     ))
     fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(24,fsize*2)), f"Top {n} paramètres les plus mesurés"))
+    fig.update_layout(margin=dict(l=MARGINS['l'], r=90, t=MARGINS['t'], b=MARGINS['b']))
     fig.update_xaxes(**axis_style(theme, fsize), title='Nb mesures')
-    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending')
+    fig.update_yaxes(**axis_style(theme, fsize), categoryorder='total ascending', automargin=True)
     return fig
 
 
@@ -612,7 +620,7 @@ def fig_quantification(dr, s, palette, theme, fsize, fig_h, n=20, sans_lq=False,
         return None
     g['pct'] = g['n_quant'] / g['n'] * 100
     top = g.sort_values(['pct', 'n'], ascending=False).head(n).iloc[::-1]
-    labels = [k[:45] + '…' if len(k) > 45 else k for k in top.index]
+    labels = [k[:60] + '…' if len(k) > 60 else k for k in top.index]
     fig = go.Figure(go.Bar(
         y=labels, x=top['pct'], orientation='h',
         marker=dict(color=top['pct'],
@@ -628,7 +636,7 @@ def fig_quantification(dr, s, palette, theme, fsize, fig_h, n=20, sans_lq=False,
                                      f"Taux de quantification — top {n} paramètres"))
     fig.update_layout(margin=dict(l=MARGINS['l'], r=130, t=MARGINS['t'], b=MARGINS['b']))
     fig.update_xaxes(**axis_style(theme, fsize), title='% des analyses > LQ', range=[0, 100])
-    fig.update_yaxes(**axis_style(theme, fsize))
+    fig.update_yaxes(**axis_style(theme, fsize), automargin=True)
     return fig
 
 
@@ -992,29 +1000,48 @@ n_raw_rows    = st.session_state['n_raw_rows']
 n_raw_cols    = st.session_state['n_raw_cols']
 
 all_supports = s_full.get('supports', [])
+col_sup_g = s_full['col_support']
+col_par_g = s_full['col_param']
+col_uni_g = s_full.get('col_unite')
+
+def _options_valides(key, options):
+    """Retire d'une sélection mémorisée les valeurs absentes des nouvelles options (filtres en cascade)."""
+    if key in st.session_state:
+        st.session_state[key] = [v for v in st.session_state[key] if v in set(options)]
 
 # ─────────────────────────────────────────────
-# FILTRES SUPPORT (sidebar, après détection)
+# FILTRES (sidebar, après détection) — appliqués à tous les onglets
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("---")
+    st.markdown("**🔽 Filtres**")
+    st.markdown(
+        "<div style='font-size:0.72rem;color:#7d8590;margin-bottom:6px;'>"
+        "Appliqués à tous les onglets. Champ vide = tout inclure.</div>",
+        unsafe_allow_html=True
+    )
+    d_opt = df_parsed
+    sel_supports = []
     if all_supports:
-        st.markdown("**🔽 Filtre par support**")
-        st.markdown(
-            "<div style='font-size:0.72rem;color:#7d8590;margin-bottom:6px;'>"
-            "Actif sur les onglets 1 et 2. Tout décocher = données vides.</div>",
-            unsafe_allow_html=True
-        )
-        sel_supports = st.multiselect(
-            "Supports à inclure",
-            options=all_supports,
-            default=all_supports,
-            help="Filtre actif sur les onglets Temporalité et Stations. Sélectionner un ou plusieurs supports."
-        )
-        if not sel_supports:
-            st.warning("⚠️ Aucun support sélectionné — sélectionnez au moins un support.")
-    else:
-        sel_supports = []
+        _options_valides('f_supports', all_supports)
+        sel_supports = st.multiselect("Supports", all_supports, key='f_supports',
+                                      placeholder="Tous les supports")
+        if sel_supports:
+            d_opt = d_opt[d_opt[col_sup_g].isin(sel_supports)]
+
+    opts_params = sorted(d_opt[col_par_g].dropna().astype(str).unique())
+    _options_valides('f_params', opts_params)
+    sel_params = st.multiselect(f"Paramètres ({len(opts_params)})", opts_params, key='f_params',
+                                placeholder="Tous les paramètres",
+                                help="Tapez quelques lettres pour rechercher un paramètre.")
+    if sel_params:
+        d_opt = d_opt[d_opt[col_par_g].isin(sel_params)]
+
+    sel_unites = []
+    if col_uni_g:
+        opts_unites = sorted(d_opt[col_uni_g].dropna().astype(str).unique())
+        _options_valides('f_unites', opts_unites)
+        sel_unites = st.multiselect("Unités", opts_unites, key='f_unites', placeholder="Toutes les unités")
 
     if st.session_state.get('file_key'):
         st.markdown(f"""
@@ -1022,60 +1049,60 @@ with st.sidebar:
         ✓ Encodage : <code style='color:#58a6ff'>{st.session_state.get('detected_enc','?')}</code><br>
         ✓ Séparateur : <code style='color:#58a6ff'>{repr(st.session_state.get('detected_sep','?'))}</code><br>
         ✓ {st.session_state.get('n_raw_rows',0):,} lignes · {st.session_state.get('n_raw_cols',0)} colonnes
-        </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
+        </div>""".replace(',', ' '), unsafe_allow_html=True)
 
-# Stats filtrées (pour onglets 1 et 2) et complètes (pour 3 et 4)
-support_filter = sel_supports if sel_supports and set(sel_supports) != set(all_supports) else None
+filters = {c: v for c, v in [(col_sup_g, sel_supports), (col_par_g, sel_params), (col_uni_g, sel_unites)] if c and v}
 
-# Cache les stats filtrées (recalcul seulement si le filtre change)
-filt_key = str(sorted(support_filter)) if support_filter else "all"
-if st.session_state.get('filt_key') != filt_key or st.session_state.get('file_key') != file_key:
-    if fmt == 'NAIADES':
-        s_filt, df_filt = stats_naiades(df_parsed, support_filter)
-        s_full_new, df_full = stats_naiades(df_parsed)
-    else:
-        s_filt, df_filt = stats_ades(df_parsed, support_filter)
-        s_full_new, df_full = stats_ades(df_parsed)
+# Stats filtrées, recalculées seulement si le fichier ou les filtres changent
+filt_key = file_key + "|" + str(sorted((c, sorted(v)) for c, v in filters.items()))
+if st.session_state.get('filt_key') != filt_key:
+    d = df_parsed
+    for c, v in filters.items():
+        d = d[d[c].astype(str).isin(v)]
+    s_filt, df_filt = stats_naiades(d) if fmt == 'NAIADES' else stats_ades(d)
     st.session_state['filt_key'] = filt_key
     st.session_state['s_filt']   = s_filt
     st.session_state['df_filt']  = df_filt
-    st.session_state['df_full']  = df_full
-    # s_full already stored but recompute if new file
-    if st.session_state.get('s_full_computed') != file_key:
-        st.session_state['s_full'] = s_full_new
-        st.session_state['s_full_computed'] = file_key
 
 s_filt  = st.session_state['s_filt']
 df_filt = st.session_state['df_filt']
-df_full = st.session_state['df_full']
-s_full  = st.session_state['s_full']
+
+# Résumé lisible des filtres actifs
+filter_parts = []
+if sel_supports:
+    filter_parts.append("Support(s) : " + ", ".join(sel_supports))
+if sel_params:
+    filter_parts.append("Paramètre(s) : " + (", ".join(sel_params) if len(sel_params) <= 3
+                                             else f"{len(sel_params)} sélectionnés"))
+if sel_unites:
+    filter_parts.append("Unité(s) : " + ", ".join(sel_unites))
+filter_note = " · ".join(filter_parts)
 
 # ─────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────
-filter_note = ""
-if support_filter:
-    filter_note = f" · Filtre : {', '.join(support_filter)}"
-
 st.markdown(f"""
 <div style='padding: 8px 0 0 0;'>
     <div class='main-title'>{uploaded.name.replace('.csv','').replace('_',' ')}</div>
     <div class='main-subtitle'>Exploration · Synthèse de la base de données</div>
     <span class='badge-source {badge_class}'>{badge_label}</span>
     <span style='font-size:0.73rem; color:#484f58; margin-left:12px;'>
-        {s_filt['annee_min']} – {s_filt['annee_max']} · {s_filt['n_mesures']:,} mesures{filter_note}
+        {s_filt['annee_min']} – {s_filt['annee_max']} · {s_filt['n_mesures']:,} mesures
     </span>
 </div>
-""".replace(',', '\u202f'), unsafe_allow_html=True)
+""".replace(',', ' '), unsafe_allow_html=True)
+
+if df_filt.empty:
+    st.warning("⚠️ Aucune donnée ne correspond aux filtres sélectionnés.")
+    st.stop()
 
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 render_kpis(s_filt, sel_palette, sel_theme, fsize, fig_w_px_export, badge_label, s_filt['annee_min'], s_filt['annee_max'], uploaded.name)
 
-if support_filter:
+if filter_note:
     st.markdown(f"""
     <div class='info-banner' style='margin-top:8px; border-left-color:#d29922;'>
-    🔽 Filtre actif — Support(s) : <b>{', '.join(support_filter)}</b>
-    · Onglets 1 et 2 filtrés · Onglets 3 et 4 sur la totalité des données
+    🔽 Filtre actif — {filter_note}
     </div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
@@ -1090,12 +1117,21 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 W = fig_w_px_export
 
+def barre_pct(label, v, total):
+    """Barre de pourcentage HTML (statuts, types de points)."""
+    pct = (v / total * 100) if total > 0 else 0
+    label = label[:55] + '…' if len(label) > 55 else label
+    st.markdown(f"""
+    <div style='margin-bottom:10px;'>
+        <div style='font-size:0.8rem;color:#8b949e;margin-bottom:3px;'>{label}</div>
+        <div style='background:#21262d;border-radius:4px;height:6px;'>
+            <div style='background:{sel_palette[0]};width:{pct:.1f}%;height:6px;border-radius:4px;'></div>
+        </div>
+        <div style='font-size:0.73rem;color:#484f58;margin-top:2px;'>{v:,} mesures ({pct:.1f}%)</div>
+    </div>""".replace(',', ' '), unsafe_allow_html=True)
+
 # ── TAB 1 : Temporalité ──────────────────────
 with tab1:
-    if support_filter:
-        st.markdown(f"<div class='filter-box'>🔽 Support(s) filtrés : <b>{', '.join(support_filter)}</b></div>",
-                    unsafe_allow_html=True)
-
     st.markdown("<div class='section-header'>Évolution temporelle</div>", unsafe_allow_html=True)
     show_fig(fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base), "evolution_temporelle", W)
 
@@ -1105,10 +1141,6 @@ with tab1:
 
 # ── TAB 2 : Stations ─────────────────────────
 with tab2:
-    if support_filter:
-        st.markdown(f"<div class='filter-box'>🔽 Support(s) filtrés : <b>{', '.join(support_filter)}</b></div>",
-                    unsafe_allow_html=True)
-
     st.markdown("<div class='section-header'>Hétérogénéité inter-stations</div>", unsafe_allow_html=True)
     st.markdown("""
     <div class='info-banner'>
@@ -1131,77 +1163,37 @@ with tab2:
 
 # ── TAB 3 : Paramètres & Supports ────────────
 with tab3:
-    col_a, col_b = st.columns([1, 1])
-    with col_a:
-        st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
-        # Paramètres par support : filtré si filtre actif
-        s_for_sup = s_filt if support_filter else s_full
-        show_fig(fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base),
-                 "parametres_par_support", W)
-        # Fractions
-        if s_full.get('fractions'):
-            st.markdown("<div class='section-header' style='margin-top:14px;'>Fractions analysées</div>",
-                        unsafe_allow_html=True)
-            for f in s_full['fractions']:
-                st.markdown(f"<div style='font-size:0.83rem;color:#8b949e;padding:2px 0;'>· {f}</div>",
-                            unsafe_allow_html=True)
-    with col_b:
-        st.markdown("<div class='section-header'>Top paramètres</div>", unsafe_allow_html=True)
-        if support_filter:
-            st.markdown(
-                f"<div class='filter-box'>🔽 Filtré — Support(s) : <b>{', '.join(support_filter)}</b></div>",
-                unsafe_allow_html=True)
-        n_top = st.slider("Nombre de paramètres", 10, 50, 20, key='top_params')
-        # Utilise les données filtrées si un filtre support est actif
-        df_for_params = df_filt if support_filter else df_full
-        s_for_params  = s_filt  if support_filter else s_full
-        show_fig(fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, n=n_top),
-                 "top_parametres", W)
+    st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
+    show_fig(fig_supports_params(s_filt, sel_palette, sel_theme, fsize, fig_h_base),
+             "parametres_par_support", W)
+    if s_filt.get('fractions'):
+        st.markdown("**Fractions analysées** : " + " · ".join(map(str, s_filt['fractions'])))
+
+    st.markdown("<div class='section-header'>Top paramètres</div>", unsafe_allow_html=True)
+    n_top = st.slider("Nombre de paramètres", 10, 50, 20, key='top_params')
+    show_fig(fig_top_params(df_filt, s_filt, sel_palette, sel_theme, fsize, fig_h_base, n=n_top),
+             "top_parametres", W)
 
 # ── TAB 4 : Qualité & Producteurs ────────────
 with tab4:
-    col_q, col_p = st.columns([1, 1])
-    with col_q:
-        st.markdown("<div class='section-header'>Qualification des données</div>", unsafe_allow_html=True)
-        show_fig(fig_qualite(s_full, sel_palette, sel_theme, fsize, fig_h_base), "qualification", W)
+    st.markdown("<div class='section-header'>Qualification des données</div>", unsafe_allow_html=True)
+    show_fig(fig_qualite(s_filt, sel_palette, sel_theme, fsize, fig_h_base), "qualification", W)
 
-        if s_full.get('statut'):
-            st.markdown("<div class='section-header'>Statut des analyses</div>", unsafe_allow_html=True)
-            t = THEMES_EXPORT[sel_theme]
-            for k, v in s_full['statut'].items():
-                pct = (v / s_full['n_mesures'] * 100) if s_full.get('n_mesures', 0) > 0 else 0
-                label = k[:55] + '…' if len(k) > 55 else k
-                st.markdown(f"""
-                <div style='margin-bottom:10px;'>
-                    <div style='font-size:0.8rem;color:#8b949e;margin-bottom:3px;'>{label}</div>
-                    <div style='background:#21262d;border-radius:4px;height:6px;'>
-                        <div style='background:{sel_palette[0]};width:{pct:.1f}%;height:6px;border-radius:4px;'></div>
-                    </div>
-                    <div style='font-size:0.73rem;color:#484f58;margin-top:2px;'>{v:,} mesures ({pct:.1f}%)</div>
-                </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
+    if s_filt.get('statut'):
+        st.markdown("<div class='section-header'>Statut des analyses</div>", unsafe_allow_html=True)
+        for k, v in s_filt['statut'].items():
+            barre_pct(k, v, s_filt['n_mesures'])
 
-    with col_p:
-        st.markdown("<div class='section-header'>Producteurs de données</div>", unsafe_allow_html=True)
-        show_fig(fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base), "producteurs", W)
+    st.markdown("<div class='section-header'>Producteurs de données</div>", unsafe_allow_html=True)
+    show_fig(fig_producteurs(s_filt, sel_palette, sel_theme, fsize, fig_h_base), "producteurs", W)
 
-        if fmt == 'ADES' and s_full.get('types_point'):
-            st.markdown("<div class='section-header'>Types de points de mesure</div>", unsafe_allow_html=True)
-            for k, v in s_full['types_point'].items():
-                pct = (v / s_full['n_mesures'] * 100) if s_full.get('n_mesures', 0) > 0 else 0
-                st.markdown(f"""
-                <div style='margin-bottom:10px;'>
-                    <div style='font-size:0.8rem;color:#8b949e;margin-bottom:3px;'>{k}</div>
-                    <div style='background:#21262d;border-radius:4px;height:6px;'>
-                        <div style='background:{sel_palette[0]};width:{pct:.1f}%;height:6px;border-radius:4px;'></div>
-                    </div>
-                    <div style='font-size:0.73rem;color:#484f58;margin-top:2px;'>{v:,} ({pct:.1f}%)</div>
-                </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
+    if fmt == 'ADES' and s_filt.get('types_point'):
+        st.markdown("<div class='section-header'>Types de points de mesure</div>", unsafe_allow_html=True)
+        for k, v in s_filt['types_point'].items():
+            barre_pct(k, v, s_filt['n_mesures'])
 
 # ── TAB 5 : Résultats par paramètre ──────────
 with tab5:
-    if support_filter:
-        st.markdown(f"<div class='filter-box'>🔽 Support(s) filtrés : <b>{', '.join(support_filter)}</b></div>",
-                    unsafe_allow_html=True)
     res_key = f"{file_key}|{filt_key}"
     if st.session_state.get('res_key') != res_key:
         st.session_state['df_res'] = prepare_resultats(df_filt, s_filt)
