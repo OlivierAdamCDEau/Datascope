@@ -94,6 +94,13 @@ THEMES_EXPORT = {
     ),
 }
 
+# Couleurs distinctes pour comparer des stations entre elles
+CAT_COLORS = ['#1565C0','#E65100','#2E7D32','#6A1B9A','#00838F',
+              '#C62828','#5D4037','#AD1457','#827717','#37474F']
+
+# Codes remarque SANDRE : 2 = < seuil de détection, 7 = traces, 10 = < seuil de quantification
+CODES_INF_LQ = {2, 7, 10}
+
 # Marges fixes (px) — indépendantes de fsize et de la taille des figures
 MARGINS = dict(l=68, r=38, t=52, b=62)
 MARGINS_WIDE = dict(l=68, r=90, t=52, b=62)   # pour colorbar droite (heatmap, bubble)
@@ -145,14 +152,43 @@ def detect_format(df):
     return 'INCONNU'
 
 # ─────────────────────────────────────────────
+# HELPERS PARSING
+# ─────────────────────────────────────────────
+def to_datetime_auto(serie):
+    """Dates au format Excel (nb de jours), jj/mm/aaaa ou aaaa-mm-jj → datetime."""
+    num = pd.to_numeric(serie.astype(str).str.replace(',', '.'), errors='coerce')
+    if num.notna().mean() > 0.5:
+        return pd.to_datetime('1899-12-30') + pd.to_timedelta(num, unit='D')
+    txt = serie.astype(str).str.strip()
+    for f in ('%d/%m/%Y', '%Y-%m-%d', '%d/%m/%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S'):
+        d = pd.to_datetime(txt, format=f, errors='coerce')
+        if d.notna().mean() > 0.5:
+            return d
+    return pd.to_datetime(txt, dayfirst=True, errors='coerce')
+
+def to_numeric_fr(serie):
+    """Nombres avec virgule décimale → float."""
+    if pd.api.types.is_numeric_dtype(serie):
+        return serie
+    return pd.to_numeric(serie.astype(str).str.replace(',', '.').str.strip(), errors='coerce')
+
+def find_col(df, *candidates):
+    """Première colonne existante parmi les candidates (None sinon)."""
+    return next((c for c in candidates if c in df.columns), None)
+
+def strip_text(df):
+    for col in df.select_dtypes(include=['object', 'string']).columns:
+        df[col] = df[col].str.strip().fillna(df[col])   # fillna : garde les valeurs non textuelles
+    return df
+
+# ─────────────────────────────────────────────
 # PARSING NAÏADES
 # ─────────────────────────────────────────────
 def parse_naiades(df):
-    df = df.copy()
+    df = strip_text(df.copy())
     for col in ['DatePrel', 'DateAna']:
         if col in df.columns:
-            df[col] = pd.to_datetime('1899-12-30') + pd.to_timedelta(
-                pd.to_numeric(df[col], errors='coerce'), unit='D')
+            df[col] = to_datetime_auto(df[col])
     df['année'] = df['DatePrel'].dt.year if 'DatePrel' in df.columns else np.nan
     df['mois']  = df['DatePrel'].dt.month if 'DatePrel' in df.columns else np.nan
     return df
@@ -171,6 +207,9 @@ def stats_naiades(df, support_filter=None):
     s['col_qualif']      = 'LbQualAna'
     s['col_statut']      = 'MnemoStatutAna'
     s['col_producteur']  = 'NomProducteur'
+    s['col_valeur']      = find_col(d, 'RsAna')
+    s['col_unite']       = find_col(d, 'SymUniteMesure')
+    s['col_rq']          = find_col(d, 'CdRqAna')
     s['n_mesures']       = len(d)
     s['n_stations']      = d['LbStationMesureEauxSurface'].nunique() if 'LbStationMesureEauxSurface' in d.columns else 0
     s['n_parametres']    = d['LbLongParamètre'].nunique() if 'LbLongParamètre' in d.columns else 0
@@ -202,10 +241,9 @@ def stats_naiades(df, support_filter=None):
 # PARSING ADES
 # ─────────────────────────────────────────────
 def parse_ades(df):
-    df = df.copy()
+    df = strip_text(df.copy())
     if 'Date prélèvement' in df.columns:
-        df['DatePrel'] = pd.to_datetime('1899-12-30') + pd.to_timedelta(
-            df['Date prélèvement'].astype(str).str.replace(',', '.').pipe(pd.to_numeric, errors='coerce'), unit='D')
+        df['DatePrel'] = to_datetime_auto(df['Date prélèvement'])
         df['année'] = df['DatePrel'].dt.year
         df['mois']  = df['DatePrel'].dt.month
     return df
@@ -224,6 +262,9 @@ def stats_ades(df, support_filter=None):
     s['col_qualif']      = 'Qualification'
     s['col_statut']      = 'Statut mesure'
     s['col_producteur']  = 'Producteur données'
+    s['col_valeur']      = find_col(d, 'Résultat', 'Resultat', 'Résultat analyse')
+    s['col_unite']       = find_col(d, 'Symbole unité', 'Unité', 'Unité du résultat')
+    s['col_rq']          = find_col(d, 'Code remarque analyse', 'Code remarque', 'Code remarque résultat')
     s['n_mesures']       = len(d)
     s['n_stations']      = d['Identifiant national BSS'].nunique() if 'Identifiant national BSS' in d.columns else 0
     s['n_parametres']    = d['Paramètre'].nunique() if 'Paramètre' in d.columns else 0
@@ -361,7 +402,7 @@ def fig_heatmap_stations(df, s, fmt, palette, theme, fsize, fig_h):
         )
         ax = axis_style(theme, fsize)
         fig.update_xaxes(**ax, title='', dtick=5)
-        fig.update_yaxes(**ax, title='')
+        fig.update_yaxes(**ax, title='', automargin=True)
         return fig
     except Exception:
         return None
@@ -547,6 +588,98 @@ def fig_top_params(df, s, palette, theme, fsize, fig_h, n=20):
     return fig
 
 
+def prepare_resultats(df, s):
+    """Colonnes normalisées pour l'analyse des résultats : _val, _inf_lq (bool)."""
+    if not s.get('col_valeur') or 'DatePrel' not in df.columns:
+        return None
+    d = df.dropna(subset=['DatePrel']).copy()
+    d['_val'] = to_numeric_fr(d[s['col_valeur']])
+    rq = to_numeric_fr(d[s['col_rq']]) if s.get('col_rq') else pd.Series(np.nan, index=d.index)
+    d['_inf_lq'] = rq.isin(CODES_INF_LQ)
+    return d.dropna(subset=['_val'])
+
+
+def fig_quantification(dr, s, palette, theme, fsize, fig_h, n=20, sans_lq=False, n_min=10):
+    """Paramètres les plus souvent quantifiés (> LQ), en % des analyses.
+    sans_lq=False écarte les paramètres jamais < LQ (pH, T°, conductivité…)."""
+    col = s['col_param']
+    g = dr.groupby(col).agg(n=('_inf_lq', 'size'), n_inf=('_inf_lq', 'sum'))
+    g['n_quant'] = g['n'] - g['n_inf']
+    g = g[(g['n_quant'] > 0) & (g['n'] >= n_min)]
+    if not sans_lq:
+        g = g[g['n_inf'] > 0]
+    if g.empty:
+        return None
+    g['pct'] = g['n_quant'] / g['n'] * 100
+    top = g.sort_values(['pct', 'n'], ascending=False).head(n).iloc[::-1]
+    labels = [k[:45] + '…' if len(k) > 45 else k for k in top.index]
+    fig = go.Figure(go.Bar(
+        y=labels, x=top['pct'], orientation='h',
+        marker=dict(color=top['pct'],
+                    colorscale=[[0, palette[3] if len(palette) > 3 else palette[-1]], [1, palette[0]]],
+                    cmin=0, cmax=100, line=dict(width=0)),
+        text=[f" {p:.0f} %  ({q:,}/{t:,})".replace(',', ' ')
+              for p, q, t in zip(top['pct'], top['n_quant'], top['n'])],
+        textfont=dict(color=bar_textcolor(theme), size=max(8, fsize-2)),
+        textposition='outside', cliponaxis=False,
+        hovertemplate='<b>%{y}</b><br>%{x:.1f} % quantifié<extra></extra>',
+    ))
+    fig.update_layout(**build_layout(theme, fsize, max(fig_h, n*max(24, fsize*2)),
+                                     f"Taux de quantification — top {n} paramètres"))
+    fig.update_layout(margin=dict(l=MARGINS['l'], r=130, t=MARGINS['t'], b=MARGINS['b']))
+    fig.update_xaxes(**axis_style(theme, fsize), title='% des analyses > LQ', range=[0, 100])
+    fig.update_yaxes(**axis_style(theme, fsize))
+    return fig
+
+
+def fig_chronique(dm, s, titre, unite, theme, fsize, fig_h):
+    """Chronique d'un paramètre, une couleur par station ; ○ = résultat < LQ (valeur = LQ)."""
+    col_st = s['col_station']
+    t = THEMES_EXPORT[theme]
+    fig = go.Figure()
+    for i, (station, g) in enumerate(dm.groupby(col_st, sort=False)):
+        c = CAT_COLORS[i % len(CAT_COLORS)]
+        g = g.sort_values('DatePrel')
+        fig.add_trace(go.Scatter(
+            x=g['DatePrel'], y=g['_val'], name=station, mode='lines+markers',
+            line=dict(color=c, width=1.2),
+            marker=dict(color=c, size=7, line=dict(color=c, width=1.5),
+                        symbol=['circle-open' if v else 'circle' for v in g['_inf_lq']]),
+            customdata=np.where(g['_inf_lq'], '< LQ', ''),
+            hovertemplate=f'<b>{station}</b><br>%{{x|%d/%m/%Y}} : %{{customdata}} %{{y}} {unite}<extra></extra>',
+        ))
+    fig.update_layout(**build_layout(theme, fsize, fig_h, titre))
+    fig.update_layout(
+        legend=dict(orientation='h', y=-0.18, x=0, bgcolor='rgba(0,0,0,0)',
+                    font=dict(size=max(8, fsize-2), color=t['font_color'])),
+        margin=dict(l=MARGINS['l'], r=MARGINS['r'], t=MARGINS['t'], b=MARGINS['b'] + 40),
+    )
+    if dm['_inf_lq'].any():
+        fig.add_annotation(text="○ résultat < LQ (tracé à la valeur de la LQ)",
+                           xref='paper', yref='paper', x=1, y=1.02, xanchor='right', yanchor='bottom',
+                           showarrow=False, font=dict(size=max(8, fsize-3), color=t['text_color']))
+    fig.update_xaxes(**axis_style(theme, fsize), title='')
+    fig.update_yaxes(**axis_style(theme, fsize), title=unite)
+    return fig
+
+
+def fig_boxplot_stations(dm, s, titre, unite, theme, fsize, fig_h):
+    """Distribution des résultats par station (amont → aval dans l'ordre choisi)."""
+    col_st = s['col_station']
+    fig = go.Figure()
+    for i, (station, g) in enumerate(dm.groupby(col_st, sort=False)):
+        c = CAT_COLORS[i % len(CAT_COLORS)]
+        fig.add_trace(go.Box(
+            y=g['_val'], name=station[:25], marker_color=c, line=dict(color=c, width=1.5),
+            boxpoints='all', jitter=0.35, pointpos=0, marker=dict(size=4, opacity=0.55),
+            showlegend=False,
+        ))
+    fig.update_layout(**build_layout(theme, fsize, fig_h, titre))
+    fig.update_xaxes(**axis_style(theme, fsize), tickangle=-30, automargin=True)
+    fig.update_yaxes(**axis_style(theme, fsize), title=unite)
+    return fig
+
+
 def make_kpi_figure(s, palette, theme, fsize, fig_w_px, fig_h_kpi, source_label, annee_min, annee_max, filename=""):
     """
     Cartouche KPI en coordonnées data (range 0-N × 0-1).
@@ -638,7 +771,7 @@ def render_kpis(s, palette, theme, fsize, fig_w_px, source_label, annee_min, ann
     h_export = max(160, int(fig_w_px * 0.22))
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch", theme=None,
         config={
             "displaylogo": False,
             "toImageButtonOptions": {
@@ -664,12 +797,30 @@ def apply_size(fig, fig_w_px, fig_h_px=None):
     return fig
 
 
+def show_fig(fig, name, fig_w_px):
+    """Affiche une figure à la taille d'export ; l'icône 📷 la télécharge en PNG 300 dpi."""
+    if fig is None:
+        st.info("Données insuffisantes pour ce graphique.")
+        return
+    try:
+        st.plotly_chart(
+            apply_size(fig, fig_w_px), width="content", theme=None,
+            config={
+                "displaylogo": False,
+                "toImageButtonOptions": {"format": "png", "filename": name, "scale": 2},
+            },
+        )
+    except Exception as e:
+        st.warning(f"⚠️ Impossible d'afficher ce graphique : {e}")
+
+
 # ─────────────────────────────────────────────
 # CHARGEMENT
 # ─────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data(file_bytes, filename):
-    encodings  = ['latin1', 'utf-8', 'cp1252']
+    # UTF-8 d'abord : latin1 « réussit » toujours et corromprait les accents d'un fichier UTF-8
+    encodings  = ['utf-8-sig', 'cp1252', 'latin1']
     separators = [',', ';', '\t']
     for enc in encodings:
         try:
@@ -690,6 +841,7 @@ def load_data(file_bytes, filename):
                 df = pd.read_csv(io.BytesIO(file_bytes), sep=sep, encoding=enc,
                                  low_memory=False, on_bad_lines='skip')
                 if df.shape[1] >= 3:
+                    df.columns = df.columns.str.replace('﻿', '').str.strip()
                     return df, enc, sep
             except Exception:
                 continue
@@ -713,7 +865,7 @@ with st.sidebar:
     st.markdown("**🎨 Mise en page**")
 
     sel_theme = st.selectbox("Fond / contexte d'export",
-        list(THEMES_EXPORT.keys()), index=2,
+        list(THEMES_EXPORT.keys()), index=0,
         help="Choisir 'Fond blanc' pour copier dans Word/PPT")
 
     sel_palette_name = st.selectbox("Palette de couleurs", list(PALETTES.keys()), index=0)
@@ -929,12 +1081,14 @@ if support_filter:
 # ─────────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈  Temporalité",
     "📍  Stations & Hétérogénéité",
     "🔬  Paramètres & Supports",
     "✅  Qualité & Producteurs",
+    "📉  Résultats par paramètre",
 ])
+W = fig_w_px_export
 
 # ── TAB 1 : Temporalité ──────────────────────
 with tab1:
@@ -943,22 +1097,11 @@ with tab1:
                     unsafe_allow_html=True)
 
     st.markdown("<div class='section-header'>Évolution temporelle</div>", unsafe_allow_html=True)
-    fig_t = fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
-    if fig_t:
-        try:
-            st.plotly_chart(apply_size(fig_t, fig_w_px_export), use_container_width=False)
-        except Exception as e:
-            st.warning(f'⚠️ Impossible d\'afficher ce graphique : {e}')
+    show_fig(fig_timeline(s_filt, sel_palette, sel_theme, fsize, fig_h_base), "evolution_temporelle", W)
 
     st.markdown("<div class='section-header'>Couverture par station</div>", unsafe_allow_html=True)
-    fig_hm = fig_heatmap_stations(df_filt, s_filt, fmt, sel_palette, sel_theme, fsize, fig_h_base)
-    if fig_hm:
-        try:
-            st.plotly_chart(apply_size(fig_hm, fig_w_px_export), use_container_width=False)
-        except Exception as e:
-            st.warning(f'⚠️ Impossible d\'afficher la heatmap : {e}')
-    else:
-        st.info("Données insuffisantes pour la heatmap.")
+    show_fig(fig_heatmap_stations(df_filt, s_filt, fmt, sel_palette, sel_theme, fsize, fig_h_base),
+             "couverture_stations", W)
 
 # ── TAB 2 : Stations ─────────────────────────
 with tab2:
@@ -973,12 +1116,8 @@ with tab2:
     Position : nb d'<b>années actives</b> (X) × nb de <b>paramètres uniques</b> (Y).
     </div>""", unsafe_allow_html=True)
 
-    fig_het = fig_stations_heterogeneite(s_filt, sel_palette, sel_theme, fsize, fig_h_base)
-    if fig_het:
-        try:
-            st.plotly_chart(apply_size(fig_het, fig_w_px_export), use_container_width=False)
-        except Exception as e:
-            st.warning(f'⚠️ Impossible d\'afficher ce graphique : {e}')
+    show_fig(fig_stations_heterogeneite(s_filt, sel_palette, sel_theme, fsize, fig_h_base),
+             "heterogeneite_stations", W)
 
     st.markdown("<div class='section-header'>Inventaire des stations</div>", unsafe_allow_html=True)
     col_st_name = 'Station' if fmt == 'NAIADES' else 'Station (BSS)'
@@ -988,7 +1127,7 @@ with tab2:
         'Paramètres':     [s_filt['params_par_station'].get(k, 0) for k in s_filt['mesures_par_station']],
         'Années actives': [s_filt['annees_par_station'].get(k, 0) for k in s_filt['mesures_par_station']],
     })
-    st.dataframe(df_st.reset_index(drop=True), use_container_width=True, height=340)
+    st.dataframe(df_st.reset_index(drop=True), width="stretch", height=340)
 
 # ── TAB 3 : Paramètres & Supports ────────────
 with tab3:
@@ -997,12 +1136,8 @@ with tab3:
         st.markdown("<div class='section-header'>Paramètres par support</div>", unsafe_allow_html=True)
         # Paramètres par support : filtré si filtre actif
         s_for_sup = s_filt if support_filter else s_full
-        fig_sp = fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base)
-        if fig_sp:
-            try:
-                st.plotly_chart(apply_size(fig_sp, fig_w_px_export), use_container_width=False)
-            except Exception as e:
-                st.warning(f'⚠️ {e}')
+        show_fig(fig_supports_params(s_for_sup, sel_palette, sel_theme, fsize, fig_h_base),
+                 "parametres_par_support", W)
         # Fractions
         if s_full.get('fractions'):
             st.markdown("<div class='section-header' style='margin-top:14px;'>Fractions analysées</div>",
@@ -1020,23 +1155,15 @@ with tab3:
         # Utilise les données filtrées si un filtre support est actif
         df_for_params = df_filt if support_filter else df_full
         s_for_params  = s_filt  if support_filter else s_full
-        fig_tp = fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, n=n_top)
-        try:
-            st.plotly_chart(apply_size(fig_tp, fig_w_px_export), use_container_width=False)
-        except Exception as e:
-            st.warning(f'⚠️ {e}')
+        show_fig(fig_top_params(df_for_params, s_for_params, sel_palette, sel_theme, fsize, fig_h_base, n=n_top),
+                 "top_parametres", W)
 
 # ── TAB 4 : Qualité & Producteurs ────────────
 with tab4:
     col_q, col_p = st.columns([1, 1])
     with col_q:
         st.markdown("<div class='section-header'>Qualification des données</div>", unsafe_allow_html=True)
-        fig_qua = fig_qualite(s_full, sel_palette, sel_theme, fsize, fig_h_base)
-        if fig_qua:
-            try:
-                st.plotly_chart(apply_size(fig_qua, fig_w_px_export), use_container_width=False)
-            except Exception as e:
-                st.warning(f'⚠️ {e}')
+        show_fig(fig_qualite(s_full, sel_palette, sel_theme, fsize, fig_h_base), "qualification", W)
 
         if s_full.get('statut'):
             st.markdown("<div class='section-header'>Statut des analyses</div>", unsafe_allow_html=True)
@@ -1055,12 +1182,7 @@ with tab4:
 
     with col_p:
         st.markdown("<div class='section-header'>Producteurs de données</div>", unsafe_allow_html=True)
-        fig_pr = fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base)
-        if fig_pr:
-            try:
-                st.plotly_chart(apply_size(fig_pr, fig_w_px_export), use_container_width=False)
-            except Exception as e:
-                st.warning(f'⚠️ {e}')
+        show_fig(fig_producteurs(s_full, sel_palette, sel_theme, fsize, fig_h_base), "producteurs", W)
 
         if fmt == 'ADES' and s_full.get('types_point'):
             st.markdown("<div class='section-header'>Types de points de mesure</div>", unsafe_allow_html=True)
@@ -1074,6 +1196,97 @@ with tab4:
                     </div>
                     <div style='font-size:0.73rem;color:#484f58;margin-top:2px;'>{v:,} ({pct:.1f}%)</div>
                 </div>""".replace(',', '\u202f'), unsafe_allow_html=True)
+
+# ── TAB 5 : Résultats par paramètre ──────────
+with tab5:
+    if support_filter:
+        st.markdown(f"<div class='filter-box'>🔽 Support(s) filtrés : <b>{', '.join(support_filter)}</b></div>",
+                    unsafe_allow_html=True)
+    res_key = f"{file_key}|{filt_key}"
+    if st.session_state.get('res_key') != res_key:
+        st.session_state['df_res'] = prepare_resultats(df_filt, s_filt)
+        st.session_state['res_key'] = res_key
+    dr = st.session_state['df_res']
+
+    if dr is None or dr.empty:
+        st.info("Aucune colonne de résultats exploitable (valeur ou date) dans ce fichier.")
+    else:
+        col_p, col_st = s_filt['col_param'], s_filt['col_station']
+        grp_cols = [c for c in (s_filt['col_support'], s_filt.get('col_unite')) if c and c in dr.columns]
+
+        # Taux de quantification
+        st.markdown("<div class='section-header'>Paramètres quantifiés</div>", unsafe_allow_html=True)
+        pct_inf = dr['_inf_lq'].mean() * 100
+        st.markdown(f"""
+        <div class='info-banner'>
+        <b>{pct_inf:.0f} %</b> des {len(dr):,} résultats sont inférieurs à la limite de quantification.
+        Le graphique classe les paramètres selon la part de résultats quantifiés (&gt; LQ).
+        </div>""".replace(',', ' '), unsafe_allow_html=True)
+        cq1, cq2 = st.columns([1, 1])
+        n_q = cq1.slider("Nombre de paramètres", 10, 50, 20, key='top_quantif')
+        sans_lq = cq2.checkbox("Inclure les paramètres toujours quantifiés (pH, T°, conductivité…)",
+                               value=False, help="Décoché : seuls les paramètres ayant au moins un résultat < LQ "
+                                                 "(micropolluants, métaux…) sont classés. Minimum 10 analyses.")
+        show_fig(fig_quantification(dr, s_filt, sel_palette, sel_theme, fsize, fig_h_base, n=n_q, sans_lq=sans_lq),
+                 "taux_quantification", W)
+
+        # Chronique d'un paramètre
+        st.markdown("<div class='section-header'>Chronique d'un paramètre</div>", unsafe_allow_html=True)
+        counts = dr[col_p].value_counts()
+        c1, c2 = st.columns([2, 1])
+        param = c1.selectbox("Paramètre (trié par nb de résultats)", counts.index,
+                             format_func=lambda p: f"{p}  ({counts[p]:,})".replace(',', ' '))
+        dp = dr[dr[col_p] == param]
+
+        # Un même paramètre peut être mesuré sur plusieurs supports / unités : on n'en trace qu'un
+        unite = ""
+        if grp_cols:
+            combos = dp.groupby(grp_cols).size().sort_values(ascending=False)
+            keys = [k if isinstance(k, tuple) else (k,) for k in combos.index]
+            i_combo = c2.selectbox("Support · unité", range(len(keys)),
+                                   format_func=lambda i: f"{' · '.join(map(str, keys[i]))}  ({combos.iloc[i]})")
+            for c, v in zip(grp_cols, keys[i_combo]):
+                dp = dp[dp[c] == v]
+            unite = str(keys[i_combo][-1]) if s_filt.get('col_unite') in grp_cols else ""
+
+        st_counts = dp[col_st].value_counts()
+        sel_st = st.multiselect("Stations (l'ordre de sélection fixe l'ordre des boîtes, ex. amont → aval)",
+                                st_counts.index.tolist(), default=st_counts.index[:5].tolist())
+        an_min, an_max = int(dp['année'].min()), int(dp['année'].max())
+        if an_min < an_max:
+            an_sel = st.slider("Période", an_min, an_max, (an_min, an_max), key='periode_res')
+            dp = dp[dp['année'].between(*an_sel)]
+
+        dm = pd.concat([dp[dp[col_st] == x] for x in sel_st]) if sel_st else dp.iloc[0:0]
+        if dm.empty:
+            st.info("Sélectionnez au moins une station avec des résultats sur la période.")
+        else:
+            titre = param if len(param) <= 60 else param[:60] + '…'
+            fname = "".join(ch if ch.isalnum() else '_' for ch in param)[:40]
+            show_fig(fig_chronique(dm, s_filt, titre, unite, sel_theme, fsize, fig_h_base), f"chronique_{fname}", W)
+            show_fig(fig_boxplot_stations(dm, s_filt, f"{titre} — distribution par station", unite,
+                                          sel_theme, fsize, fig_h_base), f"boxplot_{fname}", W)
+
+            st.markdown("<div class='section-header'>Statistiques par station</div>", unsafe_allow_html=True)
+            df_stat = dm.groupby(col_st, sort=False).agg(
+                Résultats=('_val', 'size'),
+                **{'% < LQ': ('_inf_lq', lambda x: round(x.mean() * 100, 1))},
+                Minimum=('_val', 'min'), Médiane=('_val', 'median'),
+                Moyenne=('_val', 'mean'), Maximum=('_val', 'max'),
+                Début=('DatePrel', 'min'), Fin=('DatePrel', 'max'),
+            )
+            num_cols = ['Minimum', 'Médiane', 'Moyenne', 'Maximum']
+            df_stat[num_cols] = df_stat[num_cols].round(3)
+            df_stat['Début'] = df_stat['Début'].dt.strftime('%d/%m/%Y')
+            df_stat['Fin'] = df_stat['Fin'].dt.strftime('%d/%m/%Y')
+            df_stat.index.name = 'Station'
+            st.dataframe(df_stat, width="stretch")
+            st.caption("Les résultats < LQ sont comptés à la valeur de la LQ dans les statistiques.")
+            st.download_button(
+                "⬇️ Télécharger les données du graphique (CSV Excel)",
+                dm.drop(columns=['_val', '_inf_lq']).to_csv(sep=';', decimal=',', index=False).encode('utf-8-sig'),
+                file_name=f"donnees_{fname}.csv", mime="text/csv",
+            )
 
 # ─────────────────────────────────────────────
 # FOOTER
